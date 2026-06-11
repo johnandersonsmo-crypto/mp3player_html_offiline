@@ -80,6 +80,11 @@
                 <div id="currentSongTitle" class="text-xl font-bold text-white truncate px-4">Nenhuma música selecionada</div>
                 <div id="currentSongMeta" class="text-zinc-400 text-sm mt-2 truncate px-4"></div>
                 <div id="currentSongPath" class="text-zinc-500 text-xs mt-1 truncate px-4">-</div>
+                
+                <!-- Status do Cache -->
+                <div class="library-controls mt-4 flex justify-center items-center gap-3">
+                    <span id="cacheStatus" class="text-xs text-green-400 font-medium"></span>
+                </div>
             </div>
 
             <audio id="audio"></audio>
@@ -170,6 +175,7 @@
         
         let favorites = new Set();
         let playlists = {};
+        let cachedLibrary = null; // Cache da biblioteca processada
 
         const audio = document.getElementById('audio');
         const fileInput = document.getElementById('fileInput');
@@ -183,6 +189,7 @@
         const iconPlay = document.getElementById('iconPlay');
         const iconPause = document.getElementById('iconPause');
         const searchInput = document.getElementById('searchInput');
+        const cacheStatus = document.getElementById('cacheStatus');
 
         function init() {
             loadFromStorage();
@@ -201,6 +208,9 @@
                 if (e.key === 'Enter') confirmCreatePlaylist();
                 if (e.key === 'Escape') cancelCreatePlaylist();
             });
+            
+            // Tenta restaurar biblioteca do cache se disponível
+            tryLoadFromCache();
         }
 
         function loadFromStorage() {
@@ -290,6 +300,61 @@
                 });
             }
             
+            // Processar arquivos em lotes para não travar o navegador (especialmente mobile)
+            async function processFilesInBatches(files, batchSize = 5) {
+                const totalFiles = files.length;
+                let processedCount = 0;
+                const newTracks = [];
+
+                // Mostrar indicador de progresso
+                const progressDiv = document.createElement('div');
+                progressDiv.id = 'loadProgress';
+                progressDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.9);color:#fff;padding:20px;border-radius:10px;z-index:9999;font-size:18px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5);';
+                progressDiv.innerHTML = '📂 Carregando biblioteca...<br><span id="progressText" style="font-size:14px;color:#22c55e;margin-top:10px;display:block;">0/' + totalFiles + '</span>';
+                document.body.appendChild(progressDiv);
+
+                for (let i = 0; i < files.length; i += batchSize) {
+                    const batch = files.slice(i, i + batchSize);
+                    
+                    // Processa o lote atual
+                    const promises = batch.map(file => {
+                        const id = file.webkitRelativePath || file.name;
+                        const songObj = {
+                            id: id,
+                            name: file.name.replace(/\.[^/.]+$/, ""),
+                            path: file.webkitRelativePath || file.name,
+                            url: URL.createObjectURL(file),
+                            title: "",
+                            artist: "",
+                            album: ""
+                        };
+                        return readId3Tags(file, songObj);
+                    });
+                    
+                    const results = await Promise.all(promises);
+                    newTracks.push(...results);
+                    
+                    // Atualiza contador
+                    processedCount += batch.length;
+                    const progressText = document.getElementById('progressText');
+                    if (progressText) {
+                        progressText.textContent = `${processedCount}/${totalFiles}`;
+                    }
+
+                    // Pequena pausa para liberar a thread principal (evita travamento no mobile)
+                    if (i + batchSize < files.length) {
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                }
+
+                // Remove indicador de progresso
+                if (progressDiv) {
+                    progressDiv.remove();
+                }
+
+                return newTracks;
+            }
+            
             // Processa todos os arquivos - confia mais na extensão do que no MIME type no mobile
             const audioExtensions = /\.(mp3|wav|ogg|flac|m4a|aac|wma|opus)$/i;
             const audioFiles = files.filter(file => {
@@ -308,29 +373,48 @@
                 return;
             }
             
-            // Lê metadados de todos os arquivos
-            const promises = audioFiles.map(file => {
-                const id = file.webkitRelativePath || file.name;
-                const songObj = {
-                    id: id,
-                    name: file.name.replace(/\.[^/.]+$/, ""),
-                    path: file.webkitRelativePath || file.name,
-                    url: URL.createObjectURL(file),
-                    title: "",
-                    artist: "",
-                    album: ""
-                };
-                return readId3Tags(file, songObj);
-            });
-            
-            Promise.all(promises).then(results => {
+            // Lê metadados de todos os arquivos em lotes
+            processFilesInBatches(audioFiles).then(results => {
                 songs = results.sort((a, b) => a.path.localeCompare(b.path));
+                
+                // Salva no cache após processar
+                cachedLibrary = {
+                    timestamp: Date.now(),
+                    files: audioFiles.map(f => f.name),
+                    songs: songs
+                };
+                updateCacheStatus();
                 
                 renderTabs();
                 renderSongs();
                 if (currentIndex === -1) loadSong(0, false);
             });
         });
+
+        // Função para atualizar status do cache
+        function updateCacheStatus() {
+            if (cachedLibrary && cachedLibrary.songs.length > 0) {
+                const count = cachedLibrary.songs.length;
+                cacheStatus.textContent = `✓ ${count} músicas em cache`;
+                cacheStatus.className = 'text-xs text-green-400 font-medium';
+            } else {
+                cacheStatus.textContent = '';
+            }
+        }
+
+        // Tenta carregar do cache ao iniciar (opcional - requereria IndexedDB para persistência real)
+        function tryLoadFromCache() {
+            // Nota: Para cache persistente entre sessões, seria necessário usar IndexedDB
+            // Por enquanto, o cache é apenas em memória para evitar reprocessamento durante a sessão
+            if (cachedLibrary && cachedLibrary.songs.length > 0) {
+                console.log(`Carregando ${cachedLibrary.songs.length} músicas do cache`);
+                songs = cachedLibrary.songs;
+                renderTabs();
+                renderSongs();
+                if (currentIndex === -1 && songs.length > 0) loadSong(0, false);
+                updateCacheStatus();
+            }
+        }
 
         function setView(view) {
             currentView = view;

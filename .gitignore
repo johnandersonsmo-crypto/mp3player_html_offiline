@@ -7,7 +7,7 @@
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
 # Editors
 .vscode/
@@ -15,8 +15,8 @@
 
 # Dependencies
 node_modules/
-.venv/
 venv/
+.venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
@@ -40,7 +40,7 @@ Thumbs.db
 *.obj
 *.out
 
-# Coverage reports
+# Coverage
 coverage/
 htmlcov/
 .coverage
