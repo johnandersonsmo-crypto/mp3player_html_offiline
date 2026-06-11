@@ -238,27 +238,48 @@
             songs = [];
             let loadedCount = 0;
             
+            console.log(`Total de arquivos selecionados: ${files.length}`);
+            
             // Função para ler metadados ID3 de arquivos MP3
             function readId3Tags(file, songObj) {
                 return new Promise((resolve) => {
                     // Tenta ler tags ID3 apenas para arquivos MP3
                     if (file.name.match(/\.mp3$/i)) {
-                        jsmediatags.read(file, {
-                            onSuccess: function(tag) {
-                                const tags = tag.tags;
-                                songObj.title = tags.title || file.name.replace(/\.[^/.]+$/, "");
-                                songObj.artist = tags.artist || "Desconhecido";
-                                songObj.album = tags.album || "Desconhecido";
-                                resolve(songObj);
-                            },
-                            onError: function(error) {
-                                // Em caso de erro na leitura, usa fallback
+                        // Verifica se jsmediatags está disponível
+                        if (typeof jsmediatags !== 'undefined') {
+                            try {
+                                jsmediatags.read(file, {
+                                    onSuccess: function(tag) {
+                                        const tags = tag.tags || {};
+                                        songObj.title = tags.title || file.name.replace(/\.[^/.]+$/, "");
+                                        songObj.artist = tags.artist || "Desconhecido";
+                                        songObj.album = tags.album || "Desconhecido";
+                                        console.log(`ID3 lido com sucesso: ${songObj.title}`);
+                                        resolve(songObj);
+                                    },
+                                    onError: function(error) {
+                                        console.warn(`Erro ao ler ID3 de ${file.name}:`, error);
+                                        // Em caso de erro na leitura, usa fallback
+                                        songObj.title = file.name.replace(/\.[^/.]+$/, "");
+                                        songObj.artist = "Desconhecido";
+                                        songObj.album = "Desconhecido";
+                                        resolve(songObj);
+                                    }
+                                });
+                            } catch (err) {
+                                console.error(`Exceção ao ler ID3 de ${file.name}:`, err);
                                 songObj.title = file.name.replace(/\.[^/.]+$/, "");
                                 songObj.artist = "Desconhecido";
                                 songObj.album = "Desconhecido";
                                 resolve(songObj);
                             }
-                        });
+                        } else {
+                            console.warn('jsmediatags não disponível');
+                            songObj.title = file.name.replace(/\.[^/.]+$/, "");
+                            songObj.artist = "Desconhecido";
+                            songObj.album = "Desconhecido";
+                            resolve(songObj);
+                        }
                     } else {
                         // Para outros formatos, usa o nome do arquivo como título
                         songObj.title = file.name.replace(/\.[^/.]+$/, "");
@@ -269,13 +290,21 @@
                 });
             }
             
-            // Processa todos os arquivos
-            const audioFiles = files.filter(file => 
-                file.type.startsWith('audio/') || file.name.match(/\.(mp3|wav|ogg|flac|m4a|aac)$/i)
-            );
+            // Processa todos os arquivos - confia mais na extensão do que no MIME type no mobile
+            const audioExtensions = /\.(mp3|wav|ogg|flac|m4a|aac|wma|opus)$/i;
+            const audioFiles = files.filter(file => {
+                // Prioriza extensão do arquivo (mais confiável no mobile)
+                const hasAudioExtension = audioExtensions.test(file.name);
+                // Também verifica MIME type se disponível
+                const hasAudioMimeType = file.type && file.type.startsWith('audio/');
+                
+                return hasAudioExtension || hasAudioMimeType;
+            });
+            
+            console.log(`Arquivos de áudio encontrados: ${audioFiles.length}`);
             
             if (audioFiles.length === 0) {
-                playlistContainer.innerHTML = `<div class="text-center text-zinc-500 py-12"><p>Nenhum arquivo de áudio encontrado nesta pasta.</p></div>`;
+                playlistContainer.innerHTML = `<div class="text-center text-zinc-500 py-12"><svg class="w-16 h-16 mx-auto mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg><p>Nenhum arquivo de áudio encontrado nesta pasta.</p><p class="text-sm mt-2">Verifique se há arquivos MP3, WAV, OGG, etc.</p></div>`;
                 return;
             }
             
