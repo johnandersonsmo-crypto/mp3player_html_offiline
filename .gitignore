@@ -15,8 +15,8 @@
 
 # Dependencies
 node_modules/
-venv/
 .venv/
+venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
@@ -25,7 +25,7 @@ build/
 target/
 .gradle/
 
-# System files
+# OS generated files
 .DS_Store
 Thumbs.db
 
@@ -40,7 +40,7 @@ Thumbs.db
 *.obj
 *.out
 
-# Coverage
+# Coverage reports
 coverage/
 htmlcov/
 .coverage
