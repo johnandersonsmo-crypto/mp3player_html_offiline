@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -33,9 +34,9 @@
         .fav-btn.active svg { fill: #ef4444; stroke: #ef4444; transform: scale(1.1); }
         .fav-btn:not(.active) svg { fill: transparent; stroke: #71717a; }
         .fav-btn:hover svg { stroke: #ef4444; }
-        
+
         #loadingOverlay { display: none; }
-        
+
         /* Barra lateral com altura fixa baseada na viewport (desktop) */
         @media (min-width: 768px) {
             aside {
@@ -65,12 +66,12 @@
                     Artistas
                 </h2>
                 <p class="text-zinc-400 text-xs mt-1" id="artistCount">0 artistas</p>
-                
+
                 <!-- Pesquisa de Artistas -->
-                <input type="text" id="artistSearch" oninput="filterArtists()" placeholder="Buscar artista..." 
+                <input type="text" id="artistSearch" oninput="filterArtists()" placeholder="Buscar artista..."
                        class="w-full mt-3 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:outline-none focus:border-green-500">
             </div>
-            
+
             <div id="artistsList" class="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
                 <!-- Lista de artistas injetada via JS -->
             </div>
@@ -165,7 +166,7 @@
         let searchQuery = '';
         let favorites = new Set();
         let db = null;
-        
+
         // Variáveis para o Shuffle Real
         let shuffledQueue = []; // Fila embaralhada com índices da lista filtrada
         let queueIndex = 0; // Índice atual na fila embaralhada
@@ -232,7 +233,7 @@
             try {
                 await initDB();
                 const saved = await loadFromDB();
-                
+
                 if (saved.length > 0) {
                     songs = saved.map(s => ({
                         ...s,
@@ -320,7 +321,7 @@
                 } catch (e) { console.warn("Erro ao ler tags de", file.name); }
 
                 await saveToDB(songObj);
-                
+
                 const exists = songs.findIndex(s => s.id === id);
                 const newSong = { ...songObj, url: URL.createObjectURL(file) };
                 if (exists !== -1) songs[exists] = newSong; else songs.push(newSong);
@@ -346,19 +347,19 @@
             // 2. Filtro por Texto (Busca)
             if (searchQuery) {
                 const q = searchQuery.toLowerCase();
-                result = result.filter(s => 
-                    s.title.toLowerCase().includes(q) || 
+                result = result.filter(s =>
+                    s.title.toLowerCase().includes(q) ||
                     s.artist.toLowerCase().includes(q)
                 );
             }
 
             filteredSongs = result;
-            
+
             // Quando o filtro muda, precisamos reembaralhar se o shuffle estiver ativo
             if (shuffle) {
                 reshuffleQueue();
             }
-            
+
             // Se a música atual não estiver mais na lista filtrada, para ou reseta
             if (currentIndex !== -1 && filteredSongs.length > 0) {
                 // Verifica se o índice atual ainda aponta para a mesma música lógica
@@ -391,7 +392,7 @@
                 const isFav = favorites.has(song.id);
                 // O índice aqui é o índice NA LISTA FILTRADA
                 const isActive = currentIndex === index;
-                
+
                 return `
                     <div class="song-row flex items-center gap-4 p-3 rounded-xl hover:bg-zinc-800/50 cursor-pointer transition-all ${isActive ? 'active' : ''}" onclick="playAtFilteredIndex(${index})">
                         <div class="w-10 h-10 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-500 flex-shrink-0">
@@ -426,17 +427,17 @@
             renderSongs();
         }
 
-        function playSong() { 
-            audio.play(); 
-            isPlaying = true; 
-            updateControls(); 
+        function playSong() {
+            audio.play();
+            isPlaying = true;
+            updateControls();
         }
         function pauseSong() { audio.pause(); isPlaying = false; updateControls(); }
-        function togglePlay() { 
+        function togglePlay() {
             if (filteredSongs.length === 0) return;
-            if (currentIndex === -1) playAtFilteredIndex(0); 
-            else if (isPlaying) pauseSong(); 
-            else playSong(); 
+            if (currentIndex === -1) playAtFilteredIndex(0);
+            else if (isPlaying) pauseSong();
+            else playSong();
         }
 
         function updateControls() {
@@ -484,8 +485,8 @@
             return `${m.toString().padStart(2, '0')}:${r.toString().padStart(2, '0')}`;
         }
 
-        function toggleShuffle() { 
-            shuffle = !shuffle; 
+        function toggleShuffle() {
+            shuffle = !shuffle;
             const btnShuffle = document.getElementById('btnShuffle');
             if (shuffle) {
                 btnShuffle.classList.add('text-green-500');
@@ -500,7 +501,7 @@
                 btnShuffle.classList.add('text-zinc-400', 'hover:text-white');
             }
         }
-        
+
         // Função Fisher-Yates para embaralhar array
         function shuffleArray(array) {
             let copia = [...array];
@@ -510,14 +511,14 @@
             }
             return copia;
         }
-        
+
         // Cria ou recria a fila embaralhada com todos os índices da lista filtrada
         function reshuffleQueue() {
             shuffledQueue = shuffleArray(filteredSongs.map((_, index) => index));
             queueIndex = 0;
         }
-        function toggleLoop() { 
-            loop = !loop; 
+        function toggleLoop() {
+            loop = !loop;
             const btnLoop = document.getElementById('btnLoop');
             if (loop) {
                 btnLoop.classList.add('text-green-500');
@@ -531,7 +532,7 @@
         function toggleFavorite(id) {
             if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
             localStorage.setItem('mp3_favs', JSON.stringify([...favorites]));
-            
+
             // Se estivermos na view de favoritos e removermos o favorito, a lista muda
             if (currentView === 'favorites') {
                 applyFilter();
@@ -545,21 +546,21 @@
         function setView(view, artistName = null) {
             currentView = view;
             currentArtistFilter = artistName;
-            
+
             // Limpa a busca de texto ao mudar de aba principal para não confundir
             if (view === 'all' || view === 'favorites') {
                 searchQuery = '';
                 document.getElementById('searchInput').value = '';
             }
-            
+
             // Reembaralha a fila se o shuffle estiver ativo quando muda a visualização
             if (shuffle) {
                 reshuffleQueue();
             }
-            
+
             applyFilter();
             updateArtists(); // Para atualizar o estilo "ativo" na sidebar se necessário
-            
+
             // Tocar automaticamente se houver músicas e nada estiver tocando ou se mudou de contexto
             if (filteredSongs.length > 0) {
                 // Se já estava tocando algo fora do contexto atual, troca.
@@ -601,51 +602,51 @@
             }
         }
 
-        function filterSongs() { 
-            searchQuery = document.getElementById('searchInput').value; 
+        function filterSongs() {
+            searchQuery = document.getElementById('searchInput').value;
             // Reembaralha a fila se o shuffle estiver ativo quando a busca muda
             if (shuffle) {
                 reshuffleQueue();
             }
-            applyFilter(); 
+            applyFilter();
         }
 
         // Funções da Sidebar de Artistas
-        
+
         function updateArtists() {
             const artistsMap = {};
-            
+
             songs.forEach(s => {
                 if (!s.artist) return;
 
                 // Usa o nome do artista exatamente como está no metadado, sem separar ou limpar
                 const name = s.artist.trim();
-                
+
                 if (name) {
                     // Agrupa exatamente pelo nome original
-                    const key = name; 
-                    
+                    const key = name;
+
                     if (!artistsMap[key]) {
                         artistsMap[key] = { display: name, count: 0 };
                     }
                     artistsMap[key].count++;
                 }
             });
-            
+
             // Converte para array e ordena alfabeticamente
-            const artists = Object.values(artistsMap).sort((a, b) => 
+            const artists = Object.values(artistsMap).sort((a, b) =>
                 a.display.localeCompare(b.display, 'pt-BR')
             );
-            
+
             document.getElementById('artistCount').innerText = `${artists.length} artistas`;
-            
+
             renderArtistsList(artists);
         }
 
         function renderArtistsList(artists) {
             const container = document.getElementById('artistsList');
             const searchTerm = artistSearchInput.value.toLowerCase();
-            
+
             const filtered = artists.filter(artist => artist.display.toLowerCase().includes(searchTerm));
 
             if (filtered.length === 0) {
@@ -655,7 +656,7 @@
 
             // Botão "Todos" sempre no topo
             let html = `
-                <button onclick="setView('all')" 
+                <button onclick="setView('all')"
                     class="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold flex justify-between items-center transition-colors ${currentView === 'all' ? 'bg-green-900/30 text-green-400' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}">
                     <span>✓ Todos</span>
                     <span class="text-xs opacity-70">(${songs.length})</span>
@@ -666,7 +667,7 @@
             filtered.forEach(artist => {
                 const isActive = (currentView === 'artist' && currentArtistFilter === artist.display);
                 html += `
-                    <button onclick="setView('artist', '${artist.display.replace(/'/g, "\\'")}')" 
+                    <button onclick="setView('artist', '${artist.display.replace(/'/g, "\\'")}')"
                         class="w-full text-left px-3 py-2 rounded-lg text-sm flex justify-between items-center transition-colors ${isActive ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}">
                         <span class="truncate mr-2">${artist.display}</span>
                         <span class="text-xs opacity-50 flex-shrink-0">(${artist.count})</span>
@@ -689,14 +690,14 @@
             if (!confirm("Remover todas as músicas salvas?")) return;
             const transaction = db.transaction([STORE_NAME], 'readwrite');
             transaction.objectStore(STORE_NAME).clear();
-            transaction.oncomplete = () => { 
-                songs = []; 
+            transaction.oncomplete = () => {
+                songs = [];
                 filteredSongs = [];
                 currentIndex = -1;
                 audio.pause();
-                renderSongs(); 
-                updateArtists(); 
-                updateCacheStatus("Biblioteca vazia"); 
+                renderSongs();
+                updateArtists();
+                updateCacheStatus("Biblioteca vazia");
                 currentSongTitle.innerText = "Pronto para tocar";
                 currentSongMeta.innerText = "";
             };
