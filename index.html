@@ -42,6 +42,30 @@
             aside {
                 height: calc(100vh - 100px);
             }
+            #artistsList {
+                max-height: none !important;
+                overflow-y: auto !important;
+            }
+            .sidebar-collapsed #artistSearch {
+                display: block;
+            }
+            #sidebarChevron {
+                display: none !important;
+            }
+        }
+
+        /* Sidebar retrátil no mobile */
+        #artistsList {
+            max-height: 0;
+            transition: max-height 0.3s ease-in-out;
+            overflow-y: auto; /* Garante scrollbar no mobile expandido */
+        }
+        .sidebar-expanded #artistsList {
+            max-height: 50vh;
+            overflow-y: auto; /* Força scrollbar quando expandido */
+        }
+        .sidebar-collapsed #artistSearch {
+            display: none;
         }
     </style>
 </head>
@@ -59,12 +83,15 @@
     <div class="w-full max-w-7xl flex flex-col md:flex-row gap-6" style="min-height: calc(100vh - 100px);">
 
         <!-- Barra Lateral -->
-        <aside class="w-full md:w-64 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl flex flex-col overflow-hidden flex-shrink-0 max-h-[50vh] md:max-h-none">
+        <aside class="w-full md:w-64 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl flex flex-col overflow-hidden flex-shrink-0 max-h-[50vh] md:max-h-none sidebar-collapsed" id="sidebar">
             <div class="p-4 border-b border-zinc-800 flex-shrink-0">
-                <h2 class="text-lg font-bold text-white flex items-center gap-2">
-                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                    Artistas
-                </h2>
+                <button onclick="toggleSidebar()" class="w-full flex items-center justify-between text-left">
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                        Artistas
+                    </h2>
+                    <svg id="sidebarChevron" class="w-5 h-5 text-zinc-400 transition-transform duration-300 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                </button>
                 <p class="text-zinc-400 text-xs mt-1" id="artistCount">0 artistas</p>
 
                 <!-- Pesquisa de Artistas -->
@@ -612,6 +639,21 @@
         }
 
         // Funções da Sidebar de Artistas
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const chevron = document.getElementById('sidebarChevron');
+
+            if (sidebar.classList.contains('sidebar-collapsed')) {
+                sidebar.classList.remove('sidebar-collapsed');
+                sidebar.classList.add('sidebar-expanded');
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                sidebar.classList.remove('sidebar-expanded');
+                sidebar.classList.add('sidebar-collapsed');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
 
         function updateArtists() {
             const artistsMap = {};
