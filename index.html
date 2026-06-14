@@ -35,6 +35,13 @@
         .fav-btn:hover svg { stroke: #ef4444; }
         
         #loadingOverlay { display: none; }
+        
+        /* Barra lateral com altura fixa baseada na viewport (desktop) */
+        @media (min-width: 768px) {
+            aside {
+                height: calc(100vh - 100px);
+            }
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center p-4 md:p-8">
@@ -51,8 +58,8 @@
     <div class="w-full max-w-7xl flex flex-col md:flex-row gap-6" style="min-height: calc(100vh - 100px);">
 
         <!-- Barra Lateral -->
-        <aside class="w-full md:w-64 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl flex flex-col overflow-hidden flex-shrink-0">
-            <div class="p-4 border-b border-zinc-800">
+        <aside class="w-full md:w-64 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl flex flex-col overflow-hidden flex-shrink-0 max-h-[50vh] md:max-h-none">
+            <div class="p-4 border-b border-zinc-800 flex-shrink-0">
                 <h2 class="text-lg font-bold text-white flex items-center gap-2">
                     <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
                     Artistas
@@ -64,7 +71,7 @@
                        class="w-full mt-3 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:outline-none focus:border-green-500">
             </div>
             
-            <div id="artistsList" class="flex-1 overflow-y-auto p-2 space-y-1">
+            <div id="artistsList" class="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
                 <!-- Lista de artistas injetada via JS -->
             </div>
         </aside>
@@ -158,6 +165,10 @@
         let searchQuery = '';
         let favorites = new Set();
         let db = null;
+        
+        // Variáveis para o Shuffle Real
+        let shuffledQueue = []; // Fila embaralhada com índices da lista filtrada
+        let queueIndex = 0; // Índice atual na fila embaralhada
 
         const DB_NAME = 'OfflineMP3Player';
         const DB_VERSION = 1;
@@ -257,7 +268,15 @@
                 durationEl.innerText = formatTime(audio.duration);
             };
 
-            audio.onended = nextSong;
+            audio.onended = () => {
+                if (loop && !shuffle) {
+                    // Se loop estiver ativo e não estiver em shuffle, repete a música atual
+                    audio.currentTime = 0;
+                    audio.play();
+                } else {
+                    nextSong();
+                }
+            };
             progress.oninput = () => {
                 const time = (progress.value / 100) * audio.duration;
                 audio.currentTime = time;
@@ -335,6 +354,11 @@
 
             filteredSongs = result;
             
+            // Quando o filtro muda, precisamos reembaralhar se o shuffle estiver ativo
+            if (shuffle) {
+                reshuffleQueue();
+            }
+            
             // Se a música atual não estiver mais na lista filtrada, para ou reseta
             if (currentIndex !== -1 && filteredSongs.length > 0) {
                 // Verifica se o índice atual ainda aponta para a mesma música lógica
@@ -388,16 +412,25 @@
         // Toca baseado no índice da lista FILTRADA
         function playAtFilteredIndex(index) {
             if (index < 0 || index >= filteredSongs.length) return;
+
             currentIndex = index;
+
             const song = filteredSongs[index];
+
             audio.src = song.url;
             currentSongTitle.innerText = song.title;
             currentSongMeta.innerText = song.artist;
+
             playSong();
-            renderSongs(); // Atualiza visualmente qual está ativa
+
+            renderSongs();
         }
 
-        function playSong() { audio.play(); isPlaying = true; updateControls(); }
+        function playSong() { 
+            audio.play(); 
+            isPlaying = true; 
+            updateControls(); 
+        }
         function pauseSong() { audio.pause(); isPlaying = false; updateControls(); }
         function togglePlay() { 
             if (filteredSongs.length === 0) return;
@@ -413,14 +446,28 @@
 
         function nextSong() {
             if (filteredSongs.length === 0) return;
-            
+
             let next;
+
             if (shuffle) {
-                next = Math.floor(Math.random() * filteredSongs.length);
+                // Avança para o próximo índice na fila embaralhada
+                queueIndex++;
+
+                // Se chegou ao fim da fila, reembaralha e começa do zero
+                if (queueIndex >= shuffledQueue.length) {
+                    reshuffleQueue();
+                    queueIndex = 0;
+                }
+
+                next = shuffledQueue[queueIndex];
             } else {
                 next = currentIndex + 1;
-                if (next >= filteredSongs.length) next = 0;
+
+                if (next >= filteredSongs.length) {
+                    next = 0;
+                }
             }
+
             playAtFilteredIndex(next);
         }
 
@@ -439,12 +486,46 @@
 
         function toggleShuffle() { 
             shuffle = !shuffle; 
-            document.getElementById('btnShuffle').classList.toggle('text-green-500', shuffle); 
+            const btnShuffle = document.getElementById('btnShuffle');
+            if (shuffle) {
+                btnShuffle.classList.add('text-green-500');
+                btnShuffle.classList.remove('text-zinc-400', 'hover:text-white');
+                // Cria a fila embaralhada quando ativa o shuffle
+                reshuffleQueue();
+                // Garante começar da música atual
+                const pos = shuffledQueue.indexOf(currentIndex);
+                queueIndex = pos >= 0 ? pos : 0;
+            } else {
+                btnShuffle.classList.remove('text-green-500');
+                btnShuffle.classList.add('text-zinc-400', 'hover:text-white');
+            }
+        }
+        
+        // Função Fisher-Yates para embaralhar array
+        function shuffleArray(array) {
+            let copia = [...array];
+            for (let i = copia.length - 1; i > 0; i--) {
+                let j = Math.floor(Math.random() * (i + 1));
+                [copia[i], copia[j]] = [copia[j], copia[i]];
+            }
+            return copia;
+        }
+        
+        // Cria ou recria a fila embaralhada com todos os índices da lista filtrada
+        function reshuffleQueue() {
+            shuffledQueue = shuffleArray(filteredSongs.map((_, index) => index));
+            queueIndex = 0;
         }
         function toggleLoop() { 
             loop = !loop; 
-            audio.loop = loop; 
-            document.getElementById('btnLoop').classList.toggle('text-green-500', loop); 
+            const btnLoop = document.getElementById('btnLoop');
+            if (loop) {
+                btnLoop.classList.add('text-green-500');
+                btnLoop.classList.remove('text-zinc-400', 'hover:text-white');
+            } else {
+                btnLoop.classList.remove('text-green-500');
+                btnLoop.classList.add('text-zinc-400', 'hover:text-white');
+            }
         }
 
         function toggleFavorite(id) {
@@ -469,6 +550,11 @@
             if (view === 'all' || view === 'favorites') {
                 searchQuery = '';
                 document.getElementById('searchInput').value = '';
+            }
+            
+            // Reembaralha a fila se o shuffle estiver ativo quando muda a visualização
+            if (shuffle) {
+                reshuffleQueue();
             }
             
             applyFilter();
@@ -517,17 +603,40 @@
 
         function filterSongs() { 
             searchQuery = document.getElementById('searchInput').value; 
+            // Reembaralha a fila se o shuffle estiver ativo quando a busca muda
+            if (shuffle) {
+                reshuffleQueue();
+            }
             applyFilter(); 
         }
 
         // Funções da Sidebar de Artistas
+        
         function updateArtists() {
             const artistsMap = {};
+            
             songs.forEach(s => {
-                artistsMap[s.artist] = (artistsMap[s.artist] || 0) + 1;
+                if (!s.artist) return;
+
+                // Usa o nome do artista exatamente como está no metadado, sem separar ou limpar
+                const name = s.artist.trim();
+                
+                if (name) {
+                    // Agrupa exatamente pelo nome original
+                    const key = name; 
+                    
+                    if (!artistsMap[key]) {
+                        artistsMap[key] = { display: name, count: 0 };
+                    }
+                    artistsMap[key].count++;
+                }
             });
             
-            const artists = Object.entries(artistsMap).sort((a, b) => a[0].localeCompare(b[0]));
+            // Converte para array e ordena alfabeticamente
+            const artists = Object.values(artistsMap).sort((a, b) => 
+                a.display.localeCompare(b.display, 'pt-BR')
+            );
+            
             document.getElementById('artistCount').innerText = `${artists.length} artistas`;
             
             renderArtistsList(artists);
@@ -537,7 +646,7 @@
             const container = document.getElementById('artistsList');
             const searchTerm = artistSearchInput.value.toLowerCase();
             
-            const filtered = artists.filter(([name]) => name.toLowerCase().includes(searchTerm));
+            const filtered = artists.filter(artist => artist.display.toLowerCase().includes(searchTerm));
 
             if (filtered.length === 0) {
                 container.innerHTML = '<p class="text-center text-zinc-500 py-4 text-xs">Nenhum artista encontrado</p>';
@@ -554,13 +663,13 @@
                 <div class="border-t border-zinc-800 my-1"></div>
             `;
 
-            filtered.forEach(([name, count]) => {
-                const isActive = (currentView === 'artist' && currentArtistFilter === name);
+            filtered.forEach(artist => {
+                const isActive = (currentView === 'artist' && currentArtistFilter === artist.display);
                 html += `
-                    <button onclick="setView('artist', '${name.replace(/'/g, "\\'")}')" 
+                    <button onclick="setView('artist', '${artist.display.replace(/'/g, "\\'")}')" 
                         class="w-full text-left px-3 py-2 rounded-lg text-sm flex justify-between items-center transition-colors ${isActive ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}">
-                        <span class="truncate mr-2">${name}</span>
-                        <span class="text-xs opacity-50 flex-shrink-0">(${count})</span>
+                        <span class="truncate mr-2">${artist.display}</span>
+                        <span class="text-xs opacity-50 flex-shrink-0">(${artist.count})</span>
                     </button>
                 `;
             });
@@ -569,6 +678,10 @@
         }
 
         function filterArtists() {
+            // Reembaralha a fila se o shuffle estiver ativo quando a busca de artistas muda
+            if (shuffle) {
+                reshuffleQueue();
+            }
             updateArtists(); // Re-renderiza a lista de artistas baseada no input
         }
 
