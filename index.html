@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Player MP3 Local Avançado</title>
+    <title>Web Player MP3 Universal - Rápido e Privado</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.0/400.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.0/600.css">
@@ -14,151 +14,133 @@
             background-color: #0f0f11;
             color: #e4e4e7;
         }
-        
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #18181b; }
         ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #52525b; }
-
-        input[type=range] {
-            -webkit-appearance: none;
-            background: transparent;
-        }
+        input[type=range] { -webkit-appearance: none; background: transparent; }
         input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 16px;
-            width: 16px;
-            border-radius: 50%;
-            background: #22c55e;
-            cursor: pointer;
-            margin-top: -6px;
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%;
+            background: #22c55e; cursor: pointer; margin-top: -6px;
             box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
         }
         input[type=range]::-webkit-slider-runnable-track {
-            width: 100%;
-            height: 4px;
-            cursor: pointer;
-            background: #3f3f46;
-            border-radius: 2px;
+            width: 100%; height: 4px; cursor: pointer; background: #3f3f46; border-radius: 2px;
         }
-        input[type=range]:focus::-webkit-slider-runnable-track {
-            background: #52525b;
-        }
+        .song-row.active { background-color: rgba(34, 197, 94, 0.15); border-left: 3px solid #22c55e; }
+        /* Estilo do coração favorito */
+        .fav-btn svg { transition: all 0.2s; }
+        .fav-btn.active svg { fill: #ef4444; stroke: #ef4444; transform: scale(1.1); }
+        .fav-btn:not(.active) svg { fill: transparent; stroke: #71717a; }
+        .fav-btn:hover svg { stroke: #ef4444; }
         
-        .song-row.active {
-            background-color: rgba(34, 197, 94, 0.15);
-            border-left: 3px solid #22c55e;
-        }
-        
-        .star-btn.active svg {
-            fill: #eab308;
-            stroke: #eab308;
-        }
+        #loadingOverlay { display: none; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center p-4 md:p-8">
 
-    <div class="w-full max-w-4xl space-y-6">
-        
-        <div class="flex flex-col md:flex-row justify-between items-center gap-4 bg-zinc-900 p-6 rounded-2xl border border-zinc-800 shadow-xl">
-            <div>
-                <h1 class="text-2xl font-bold text-white flex items-center gap-2">
-                    <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
-                    Player MP3 Local
-                </h1>
-                <p class="text-zinc-400 text-sm mt-1">Carregue uma pasta com suas músicas. Favoritos e playlists são salvos automaticamente.</p>
-            </div>
-            <label class="cursor-pointer bg-green-600 hover:bg-green-500 text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-green-900/20">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                Selecionar Pasta
-                <input type="file" id="fileInput" webkitdirectory directory multiple accept="audio/*" class="hidden">
-            </label>
+    <div id="loadingOverlay" class="fixed inset-0 bg-black/90 z-[100] flex flex-col items-center justify-center text-white p-6 text-center">
+        <div class="w-16 h-16 border-4 border-green-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <h2 class="text-xl font-bold mb-2">Processando Biblioteca</h2>
+        <p id="loadingStatus" class="text-zinc-400">Preparando arquivos...</p>
+        <div class="w-full max-w-xs bg-zinc-800 h-2 rounded-full mt-4 overflow-hidden">
+            <div id="loadingBar" class="bg-green-500 h-full w-0 transition-all duration-300"></div>
         </div>
+    </div>
 
-        <div class="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 shadow-xl">
-            <div class="text-center mb-6">
-                <div id="currentSongTitle" class="text-xl font-bold text-white truncate px-4">Nenhuma música selecionada</div>
-                <div id="currentSongMeta" class="text-zinc-400 text-sm mt-2 truncate px-4"></div>
-                <div id="currentSongPath" class="text-zinc-500 text-xs mt-1 truncate px-4">-</div>
-                
-                <!-- Status do Cache -->
-                <div class="library-controls mt-4 flex justify-center items-center gap-3">
-                    <span id="cacheStatus" class="text-xs text-green-400 font-medium"></span>
-                </div>
-            </div>
+    <div class="w-full max-w-7xl flex flex-col md:flex-row gap-6" style="min-height: calc(100vh - 100px);">
 
-            <audio id="audio"></audio>
-
-            <div class="mb-6">
-                <input type="range" id="progress" value="0" min="0" max="100" class="w-full mb-2">
-                <div class="flex justify-between text-xs text-zinc-400 font-mono">
-                    <span id="currentTime">00:00</span>
-                    <span id="duration">00:00</span>
-                </div>
-            </div>
-
-            <div class="flex justify-center items-center gap-4 mb-6">
-                <button onclick="toggleShuffle()" id="btnShuffle" class="p-3 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all" title="Aleatório">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" />
-                    </svg>
-                </button>
-                <button onclick="prevSong()" class="p-3 rounded-full text-white hover:bg-zinc-800 transition-all" title="Anterior">
-                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"></path></svg>
-                </button>
-                <button onclick="togglePlay()" id="btnPlay" class="p-4 rounded-full bg-green-500 text-black hover:bg-green-400 transition-all shadow-lg shadow-green-500/20" title="Play/Pause">
-                    <svg id="iconPlay" class="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
-                    <svg id="iconPause" class="w-8 h-8 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg>
-                </button>
-                <button onclick="nextSong()" class="p-3 rounded-full text-white hover:bg-zinc-800 transition-all" title="Próxima">
-                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"></path></svg>
-                </button>
-                <button onclick="toggleLoop()" id="btnLoop" class="p-3 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all" title="Repetir">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                    </svg>
-                </button>
-            </div>
-
-            <div class="flex items-center gap-3 max-w-xs mx-auto">
-                <svg class="w-5 h-5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
-                <input type="range" id="volume" min="0" max="1" step="0.01" value="1" class="flex-1">
-            </div>
-        </div>
-
-        <div class="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl overflow-hidden flex flex-col" style="min-height: 400px;">
-            <div class="flex items-center gap-2 p-4 border-b border-zinc-800 overflow-x-auto">
-                <button onclick="setView('all')" id="tab-all" class="px-4 py-2 rounded-lg text-sm font-semibold bg-zinc-800 text-white whitespace-nowrap transition-colors">Todas</button>
-                <button onclick="setView('favorites')" id="tab-favorites" class="px-4 py-2 rounded-lg text-sm font-semibold text-zinc-400 hover:bg-zinc-800 hover:text-white whitespace-nowrap transition-colors flex items-center gap-1">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>
-                    Favoritas
-                </button>
-                <div id="playlistTabs" class="flex items-center gap-2"></div>
-                
-                <button id="btnNewPlaylist" onclick="showCreatePlaylist()" class="px-3 py-2 rounded-lg text-sm font-semibold text-green-400 hover:bg-green-400/10 whitespace-nowrap transition-colors flex items-center gap-1 ml-2 border border-dashed border-green-400/30">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                    Nova Playlist
-                </button>
-                <div id="newPlaylistContainer" class="hidden flex items-center gap-2 ml-2">
-                    <input type="text" id="newPlaylistInput" placeholder="Nome da playlist" class="bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:outline-none focus:border-green-500 w-40">
-                    <button onclick="confirmCreatePlaylist()" class="text-green-400 hover:text-green-300 text-sm font-semibold">Criar</button>
-                    <button onclick="cancelCreatePlaylist()" class="text-zinc-500 hover:text-zinc-300 text-sm font-bold px-2">×</button>
-                </div>
-            </div>
-
+        <!-- Barra Lateral -->
+        <aside class="w-full md:w-64 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl flex flex-col overflow-hidden flex-shrink-0">
             <div class="p-4 border-b border-zinc-800">
-                <div class="relative">
-                    <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                    </svg>
-                    <input type="text" id="searchInput" oninput="filterSongs()" placeholder="Pesquisar por música, artista, álbum..." class="w-full bg-zinc-800 text-white rounded-xl pl-10 pr-4 py-3 border border-zinc-700 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition-colors" />
+                <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                    Artistas
+                </h2>
+                <p class="text-zinc-400 text-xs mt-1" id="artistCount">0 artistas</p>
+                
+                <!-- Pesquisa de Artistas -->
+                <input type="text" id="artistSearch" oninput="filterArtists()" placeholder="Buscar artista..." 
+                       class="w-full mt-3 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:outline-none focus:border-green-500">
+            </div>
+            
+            <div id="artistsList" class="flex-1 overflow-y-auto p-2 space-y-1">
+                <!-- Lista de artistas injetada via JS -->
+            </div>
+        </aside>
+
+        <!-- Área Principal -->
+        <div class="flex-1 flex flex-col min-w-0 gap-6">
+            <div class="flex flex-col md:flex-row justify-between items-center gap-4 bg-zinc-900 p-6 rounded-2xl border border-zinc-800 shadow-xl">
+                <div>
+                    <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
+                        Player MP3 Offline
+                    </h1>
+                    <p class="text-zinc-400 text-sm mt-1">Músicas salvas no navegador para acesso permanente.</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="clearLibrary()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold py-3 px-4 rounded-xl transition-all border border-zinc-700 text-sm">
+                        Limpar Biblioteca
+                    </button>
+                    <label class="cursor-pointer bg-green-600 hover:bg-green-500 text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-green-900/20">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                        Carregar Pasta
+                        <input type="file" id="fileInput" webkitdirectory directory multiple accept="audio/*" class="hidden">
+                    </label>
                 </div>
             </div>
 
-            <div id="playlistContainer" class="flex-1 overflow-y-auto p-2 space-y-1">
-                <div class="text-center text-zinc-500 py-12">
-                    <svg class="w-16 h-16 mx-auto mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
-                    <p>Selecione uma pasta para começar</p>
+            <div class="bg-zinc-900 p-6 rounded-2xl border border-zinc-800 shadow-xl">
+                <div class="text-center mb-6">
+                    <div id="currentSongTitle" class="text-xl font-bold text-white truncate px-4">Pronto para tocar</div>
+                    <div id="currentSongMeta" class="text-zinc-400 text-sm mt-2 px-4">Selecione uma música</div>
+                    <div id="cacheStatus" class="text-xs text-green-400 font-medium mt-4">Aguardando arquivos...</div>
+                </div>
+
+                <audio id="audio"></audio>
+
+                <div class="mb-6">
+                    <input type="range" id="progress" value="0" min="0" max="100" class="w-full mb-2">
+                    <div class="flex justify-between text-xs text-zinc-400 font-mono">
+                        <span id="currentTime">00:00</span>
+                        <span id="duration">00:00</span>
+                    </div>
+                </div>
+
+                <div class="flex justify-center items-center gap-4 mb-6">
+                    <button onclick="toggleShuffle()" id="btnShuffle" class="p-3 rounded-full text-zinc-400 hover:text-white transition-all">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" /></svg>
+                    </button>
+                    <button onclick="prevSong()" class="p-3 rounded-full text-white hover:bg-zinc-800 transition-all"><svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"></path></svg></button>
+                    <button onclick="togglePlay()" id="btnPlay" class="p-4 rounded-full bg-green-500 text-black hover:bg-green-400 transition-all shadow-lg"><svg id="iconPlay" class="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg><svg id="iconPause" class="w-8 h-8 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg></button>
+                    <button onclick="nextSong()" class="p-3 rounded-full text-white hover:bg-zinc-800 transition-all"><svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"></path></svg></button>
+                    <button onclick="toggleLoop()" id="btnLoop" class="p-3 rounded-full text-zinc-400 hover:text-white transition-all"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg></button>
+                </div>
+
+                <div class="flex items-center gap-3 max-w-xs mx-auto">
+                    <svg class="w-5 h-5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
+                    <input type="range" id="volume" min="0" max="1" step="0.01" value="1" class="flex-1">
+                </div>
+            </div>
+
+            <div class="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl overflow-hidden flex flex-col flex-1" style="min-height: 400px;">
+                <div class="flex items-center gap-2 p-4 border-b border-zinc-800 overflow-x-auto">
+                    <button onclick="setView('all')" id="tab-all" class="px-4 py-2 rounded-lg text-sm font-semibold bg-zinc-800 text-white whitespace-nowrap">Todas</button>
+                    <!-- Botão Favoritos com Coração -->
+                    <button onclick="setView('favorites')" id="tab-favorites" class="px-4 py-2 rounded-lg text-sm font-semibold text-zinc-400 hover:bg-zinc-800 hover:text-white whitespace-nowrap flex items-center gap-1 transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                        Favoritas
+                    </button>
+                    <div id="playlistTabs" class="flex items-center gap-2"></div>
+                </div>
+
+                <div class="p-4 border-b border-zinc-800">
+                    <input type="text" id="searchInput" oninput="filterSongs()" placeholder="Pesquisar músicas..." class="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 border border-zinc-700 focus:outline-none focus:border-green-500" />
+                </div>
+
+                <div id="playlistContainer" class="flex-1 overflow-y-auto p-2 space-y-1">
+                    <div class="text-center text-zinc-500 py-12">Nenhuma música carregada.</div>
                 </div>
             </div>
         </div>
@@ -166,607 +148,450 @@
 
     <script>
         let songs = [];
-        let currentIndex = -1;
+        let filteredSongs = []; // Lista atualmente visível (filtrada)
+        let currentIndex = -1; // Índice na lista FILTRADA
         let isPlaying = false;
         let shuffle = false;
         let loop = false;
-        let currentView = 'all';
+        let currentView = 'all'; // 'all', 'favorites', 'artist'
+        let currentArtistFilter = null;
         let searchQuery = '';
-        
         let favorites = new Set();
-        let playlists = {};
-        let cachedLibrary = null; // Cache da biblioteca processada
+        let db = null;
+
+        const DB_NAME = 'OfflineMP3Player';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'songs';
 
         const audio = document.getElementById('audio');
-        const fileInput = document.getElementById('fileInput');
         const playlistContainer = document.getElementById('playlistContainer');
         const currentSongTitle = document.getElementById('currentSongTitle');
-        const currentSongPath = document.getElementById('currentSongPath');
+        const currentSongMeta = document.getElementById('currentSongMeta');
         const progress = document.getElementById('progress');
         const currentTimeEl = document.getElementById('currentTime');
         const durationEl = document.getElementById('duration');
         const volumeSlider = document.getElementById('volume');
         const iconPlay = document.getElementById('iconPlay');
         const iconPause = document.getElementById('iconPause');
-        const searchInput = document.getElementById('searchInput');
         const cacheStatus = document.getElementById('cacheStatus');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingStatus = document.getElementById('loadingStatus');
+        const loadingBar = document.getElementById('loadingBar');
+        const artistSearchInput = document.getElementById('artistSearch');
 
-        function init() {
-            loadFromStorage();
-            renderTabs();
-            
-            document.addEventListener('keydown', e => {
-                if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
-                    e.preventDefault();
-                    togglePlay();
-                }
-                if (e.code === 'ArrowRight' && e.ctrlKey) nextSong();
-                if (e.code === 'ArrowLeft' && e.ctrlKey) prevSong();
+        // Inicializa Banco de Dados
+        async function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                    }
+                };
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    resolve();
+                };
+                request.onerror = (e) => reject(e.target.error);
             });
-
-            document.getElementById('newPlaylistInput').addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') confirmCreatePlaylist();
-                if (e.key === 'Escape') cancelCreatePlaylist();
-            });
-            
-            // Tenta restaurar biblioteca do cache se disponível
-            tryLoadFromCache();
         }
 
-        function loadFromStorage() {
+        async function loadFromDB() {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([STORE_NAME], 'readonly');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function saveToDB(song) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([STORE_NAME], 'readwrite');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.put(song);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function init() {
             try {
-                const favs = localStorage.getItem('mp3_favorites');
+                await initDB();
+                const saved = await loadFromDB();
+                
+                if (saved.length > 0) {
+                    songs = saved.map(s => ({
+                        ...s,
+                        url: URL.createObjectURL(s.file)
+                    }));
+                    updateCacheStatus(`✓ ${songs.length} músicas carregadas da memória`);
+                    applyFilter(); // Aplica filtro inicial e renderiza
+                    updateArtists();
+                }
+
+                const favs = localStorage.getItem('mp3_favs');
                 if (favs) favorites = new Set(JSON.parse(favs));
 
-                const pls = localStorage.getItem('mp3_playlists');
-                if (pls) {
-                    const parsed = JSON.parse(pls);
-                    for (const [name, ids] of Object.entries(parsed)) {
-                        playlists[name] = new Set(ids);
-                    }
-                }
-            } catch (e) {
-                console.error("Erro ao carregar dados:", e);
+                setupEventListeners();
+            } catch (err) {
+                console.error("Erro na inicialização:", err);
+                updateCacheStatus("Erro ao carregar banco de dados.");
             }
         }
 
-        function saveToStorage() {
-            try {
-                localStorage.setItem('mp3_favorites', JSON.stringify([...favorites]));
-                const plsObj = {};
-                for (const [name, ids] of Object.entries(playlists)) {
-                    plsObj[name] = [...ids];
-                }
-                localStorage.setItem('mp3_playlists', JSON.stringify(plsObj));
-            } catch (e) {
-                console.error("Erro ao salvar dados:", e);
-            }
-        }
-
-        fileInput.addEventListener('change', function(e) {
-            const files = Array.from(e.target.files);
-            songs = [];
-            let loadedCount = 0;
-            
-            console.log(`Total de arquivos selecionados: ${files.length}`);
-            
-            // Função para ler metadados ID3 de arquivos MP3
-            function readId3Tags(file, songObj) {
-                return new Promise((resolve) => {
-                    // Tenta ler tags ID3 apenas para arquivos MP3
-                    if (file.name.match(/\.mp3$/i)) {
-                        // Verifica se jsmediatags está disponível
-                        if (typeof jsmediatags !== 'undefined') {
-                            try {
-                                jsmediatags.read(file, {
-                                    onSuccess: function(tag) {
-                                        const tags = tag.tags || {};
-                                        songObj.title = tags.title || file.name.replace(/\.[^/.]+$/, "");
-                                        songObj.artist = tags.artist || "Desconhecido";
-                                        songObj.album = tags.album || "Desconhecido";
-                                        console.log(`ID3 lido com sucesso: ${songObj.title}`);
-                                        resolve(songObj);
-                                    },
-                                    onError: function(error) {
-                                        console.warn(`Erro ao ler ID3 de ${file.name}:`, error);
-                                        // Em caso de erro na leitura, usa fallback
-                                        songObj.title = file.name.replace(/\.[^/.]+$/, "");
-                                        songObj.artist = "Desconhecido";
-                                        songObj.album = "Desconhecido";
-                                        resolve(songObj);
-                                    }
-                                });
-                            } catch (err) {
-                                console.error(`Exceção ao ler ID3 de ${file.name}:`, err);
-                                songObj.title = file.name.replace(/\.[^/.]+$/, "");
-                                songObj.artist = "Desconhecido";
-                                songObj.album = "Desconhecido";
-                                resolve(songObj);
-                            }
-                        } else {
-                            console.warn('jsmediatags não disponível');
-                            songObj.title = file.name.replace(/\.[^/.]+$/, "");
-                            songObj.artist = "Desconhecido";
-                            songObj.album = "Desconhecido";
-                            resolve(songObj);
-                        }
-                    } else {
-                        // Para outros formatos, usa o nome do arquivo como título
-                        songObj.title = file.name.replace(/\.[^/.]+$/, "");
-                        songObj.artist = "Desconhecido";
-                        songObj.album = "Desconhecido";
-                        resolve(songObj);
-                    }
-                });
-            }
-            
-            // Processar arquivos em lotes para não travar o navegador (especialmente mobile)
-            async function processFilesInBatches(files, batchSize = 5) {
-                const totalFiles = files.length;
-                let processedCount = 0;
-                const newTracks = [];
-
-                // Mostrar indicador de progresso
-                const progressDiv = document.createElement('div');
-                progressDiv.id = 'loadProgress';
-                progressDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.9);color:#fff;padding:20px;border-radius:10px;z-index:9999;font-size:18px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5);';
-                progressDiv.innerHTML = '📂 Carregando biblioteca...<br><span id="progressText" style="font-size:14px;color:#22c55e;margin-top:10px;display:block;">0/' + totalFiles + '</span>';
-                document.body.appendChild(progressDiv);
-
-                for (let i = 0; i < files.length; i += batchSize) {
-                    const batch = files.slice(i, i + batchSize);
-                    
-                    // Processa o lote atual
-                    const promises = batch.map(file => {
-                        const id = file.webkitRelativePath || file.name;
-                        const songObj = {
-                            id: id,
-                            name: file.name.replace(/\.[^/.]+$/, ""),
-                            path: file.webkitRelativePath || file.name,
-                            url: URL.createObjectURL(file),
-                            title: "",
-                            artist: "",
-                            album: ""
-                        };
-                        return readId3Tags(file, songObj);
-                    });
-                    
-                    const results = await Promise.all(promises);
-                    newTracks.push(...results);
-                    
-                    // Atualiza contador
-                    processedCount += batch.length;
-                    const progressText = document.getElementById('progressText');
-                    if (progressText) {
-                        progressText.textContent = `${processedCount}/${totalFiles}`;
-                    }
-
-                    // Pequena pausa para liberar a thread principal (evita travamento no mobile)
-                    if (i + batchSize < files.length) {
-                        await new Promise(resolve => setTimeout(resolve, 50));
-                    }
-                }
-
-                // Remove indicador de progresso
-                if (progressDiv) {
-                    progressDiv.remove();
-                }
-
-                return newTracks;
-            }
-            
-            // Processa todos os arquivos - confia mais na extensão do que no MIME type no mobile
-            const audioExtensions = /\.(mp3|wav|ogg|flac|m4a|aac|wma|opus)$/i;
-            const audioFiles = files.filter(file => {
-                // Prioriza extensão do arquivo (mais confiável no mobile)
-                const hasAudioExtension = audioExtensions.test(file.name);
-                // Também verifica MIME type se disponível
-                const hasAudioMimeType = file.type && file.type.startsWith('audio/');
-                
-                return hasAudioExtension || hasAudioMimeType;
+        function setupEventListeners() {
+            document.getElementById('fileInput').addEventListener('change', async (e) => {
+                const files = Array.from(e.target.files).filter(f => f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|ogg|flac|m4a)$/i));
+                if (files.length === 0) return;
+                await processFiles(files);
             });
-            
-            console.log(`Arquivos de áudio encontrados: ${audioFiles.length}`);
-            
-            if (audioFiles.length === 0) {
-                playlistContainer.innerHTML = `<div class="text-center text-zinc-500 py-12"><svg class="w-16 h-16 mx-auto mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg><p>Nenhum arquivo de áudio encontrado nesta pasta.</p><p class="text-sm mt-2">Verifique se há arquivos MP3, WAV, OGG, etc.</p></div>`;
-                return;
-            }
-            
-            // Lê metadados de todos os arquivos em lotes
-            processFilesInBatches(audioFiles).then(results => {
-                songs = results.sort((a, b) => a.path.localeCompare(b.path));
-                
-                // Salva no cache após processar
-                cachedLibrary = {
-                    timestamp: Date.now(),
-                    files: audioFiles.map(f => f.name),
-                    songs: songs
+
+            audio.ontimeupdate = () => {
+                if (isNaN(audio.duration)) return;
+                const percent = (audio.currentTime / audio.duration) * 100;
+                progress.value = percent;
+                currentTimeEl.innerText = formatTime(audio.currentTime);
+                durationEl.innerText = formatTime(audio.duration);
+            };
+
+            audio.onended = nextSong;
+            progress.oninput = () => {
+                const time = (progress.value / 100) * audio.duration;
+                audio.currentTime = time;
+            };
+            volumeSlider.oninput = () => { audio.volume = volumeSlider.value; };
+        }
+
+        async function processFiles(files) {
+            loadingOverlay.style.display = 'flex';
+            let processed = 0;
+            const total = files.length;
+
+            for (const file of files) {
+                processed++;
+                const percent = Math.round((processed / total) * 100);
+                loadingStatus.innerText = `Salvando: ${file.name} (${processed}/${total})`;
+                loadingBar.style.width = `${percent}%`;
+
+                const id = file.webkitRelativePath || file.name;
+                const songObj = {
+                    id: id,
+                    name: file.name.replace(/\.[^/.]+$/, ""),
+                    file: file,
+                    title: file.name.replace(/\.[^/.]+$/, ""),
+                    artist: "Desconhecido",
+                    album: "Desconhecido"
                 };
-                updateCacheStatus();
+
+                try {
+                    await new Promise(resolve => {
+                        jsmediatags.read(file, {
+                            onSuccess: (tag) => {
+                                songObj.title = tag.tags.title || songObj.title;
+                                songObj.artist = tag.tags.artist || "Desconhecido";
+                                songObj.album = tag.tags.album || "Desconhecido";
+                                resolve();
+                            },
+                            onError: () => resolve()
+                        });
+                    });
+                } catch (e) { console.warn("Erro ao ler tags de", file.name); }
+
+                await saveToDB(songObj);
                 
-                renderTabs();
-                renderSongs();
-                if (currentIndex === -1) loadSong(0, false);
-            });
-        });
-
-        // Função para atualizar status do cache
-        function updateCacheStatus() {
-            if (cachedLibrary && cachedLibrary.songs.length > 0) {
-                const count = cachedLibrary.songs.length;
-                cacheStatus.textContent = `✓ ${count} músicas em cache`;
-                cacheStatus.className = 'text-xs text-green-400 font-medium';
-            } else {
-                cacheStatus.textContent = '';
+                const exists = songs.findIndex(s => s.id === id);
+                const newSong = { ...songObj, url: URL.createObjectURL(file) };
+                if (exists !== -1) songs[exists] = newSong; else songs.push(newSong);
             }
+
+            loadingOverlay.style.display = 'none';
+            updateCacheStatus(`✓ ${songs.length} músicas prontas`);
+            applyFilter();
+            updateArtists();
         }
 
-        // Tenta carregar do cache ao iniciar (opcional - requereria IndexedDB para persistência real)
-        function tryLoadFromCache() {
-            // Nota: Para cache persistente entre sessões, seria necessário usar IndexedDB
-            // Por enquanto, o cache é apenas em memória para evitar reprocessamento durante a sessão
-            if (cachedLibrary && cachedLibrary.songs.length > 0) {
-                console.log(`Carregando ${cachedLibrary.songs.length} músicas do cache`);
-                songs = cachedLibrary.songs;
-                renderTabs();
-                renderSongs();
-                if (currentIndex === -1 && songs.length > 0) loadSong(0, false);
-                updateCacheStatus();
-            }
-        }
-
-        function setView(view) {
-            currentView = view;
-            document.querySelectorAll('[id^="tab-"]').forEach(tab => {
-                tab.classList.remove('bg-zinc-800', 'text-white');
-                tab.classList.add('text-zinc-400');
-            });
-            
-            const activeTab = document.getElementById(`tab-${view === 'all' ? 'all' : view === 'favorites' ? 'favorites' : 'pl-' + view}`);
-            if (activeTab) {
-                activeTab.classList.remove('text-zinc-400');
-                activeTab.classList.add('bg-zinc-800', 'text-white');
-            }
-            renderSongs();
-        }
-
-        function normalizeText(text) {
-            return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-        }
-
-        function getCurrentViewSongs() {
+        // Função central de filtragem
+        function applyFilter() {
             let result = songs;
-            if (currentView === 'all') result = songs;
-            else if (currentView === 'favorites') result = songs.filter(s => favorites.has(s.id));
-            else if (playlists[currentView]) result = songs.filter(s => playlists[currentView].has(s.id));
 
-            if (searchQuery.trim()) {
-                const normalizedQuery = normalizeText(searchQuery);
+            // 1. Filtro por Tipo de Visualização (Todos, Favoritos, Artista)
+            if (currentView === 'favorites') {
+                result = result.filter(s => favorites.has(s.id));
+            } else if (currentView === 'artist' && currentArtistFilter) {
+                result = result.filter(s => s.artist === currentArtistFilter);
+            }
+
+            // 2. Filtro por Texto (Busca)
+            if (searchQuery) {
+                const q = searchQuery.toLowerCase();
                 result = result.filter(s => 
-                    normalizeText(s.name).includes(normalizedQuery) || 
-                    normalizeText(s.path).includes(normalizedQuery) ||
-                    normalizeText(s.title || '').includes(normalizedQuery) ||
-                    normalizeText(s.artist || '').includes(normalizedQuery) ||
-                    normalizeText(s.album || '').includes(normalizedQuery)
+                    s.title.toLowerCase().includes(q) || 
+                    s.artist.toLowerCase().includes(q)
                 );
             }
 
-            return result;
-        }
-
-        function filterSongs() {
-            searchQuery = searchInput.value;
-            renderSongs();
-        }
-
-        function renderTabs() {
-            const container = document.getElementById('playlistTabs');
-            container.innerHTML = '';
+            filteredSongs = result;
             
-            Object.keys(playlists).forEach(name => {
-                const btn = document.createElement('button');
-                btn.id = `tab-pl-${name}`;
-                btn.className = `px-4 py-2 rounded-lg text-sm font-semibold text-zinc-400 hover:bg-zinc-800 hover:text-white whitespace-nowrap transition-colors flex items-center gap-2 group`;
-                btn.innerHTML = `
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg>
-                    ${name}
-                    <span onclick="event.stopPropagation(); deletePlaylist('${name}')" class="ml-1 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Excluir playlist">×</span>
-                `;
-                btn.onclick = () => setView(name);
-                container.appendChild(btn);
-            });
-            setView(currentView);
+            // Se a música atual não estiver mais na lista filtrada, para ou reseta
+            if (currentIndex !== -1 && filteredSongs.length > 0) {
+                // Verifica se o índice atual ainda aponta para a mesma música lógica
+                // Mas como o índice é relativo à lista filtrada, precisamos ter cuidado.
+                // A abordagem mais segura é: se mudamos de filtro drasticamente, paramos.
+                // Mas se estamos apenas digitando na busca, mantemos se possível.
+                // Para simplificar a lógica de "clicar no artista e tocar":
+                // Vamos apenas re-renderizar. A lógica de play está nos cliques dos botões.
+            } else if (filteredSongs.length === 0) {
+                currentIndex = -1;
+                audio.pause();
+                isPlaying = false;
+                updateControls();
+                currentSongTitle.innerText = "Nenhuma música encontrada";
+                currentSongMeta.innerText = "";
+            }
+
+            renderSongs();
+            updateTabStyles();
         }
 
         function renderSongs() {
-            const scrollPos = playlistContainer.scrollTop;
-            const filtered = getCurrentViewSongs();
-            playlistContainer.innerHTML = '';
-            
-            if (filtered.length === 0) {
-                playlistContainer.innerHTML = `<div class="text-center text-zinc-500 py-12"><p>${currentView === 'favorites' ? 'Nenhuma música favorita ainda.' : 'Playlist vazia.'}</p></div>`;
+            if (filteredSongs.length === 0) {
+                playlistContainer.innerHTML = `<div class="text-center text-zinc-500 py-12">Nenhuma música encontrada</div>`;
                 return;
             }
 
-            filtered.forEach((song, index) => {
-                const actualIndex = songs.findIndex(s => s.id === song.id);
-                const isCurrent = actualIndex === currentIndex;
+            playlistContainer.innerHTML = filteredSongs.map((song, index) => {
+                // Precisamos encontrar o ID real para checar favoritos
                 const isFav = favorites.has(song.id);
+                // O índice aqui é o índice NA LISTA FILTRADA
+                const isActive = currentIndex === index;
                 
-                // Verifica se estamos em uma playlist criada pelo usuário para mostrar o botão de remover
-                const isUserPlaylist = currentView !== 'all' && currentView !== 'favorites' && playlists[currentView];
-                const isInCurrentPlaylist = isUserPlaylist && playlists[currentView].has(song.id);
-                
-                const div = document.createElement('div');
-                div.className = `song-row flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/50 transition-all cursor-pointer group ${isCurrent ? 'active' : ''}`;
-                div.onclick = (e) => {
-                    if (!e.target.closest('button') && !e.target.closest('select')) {
-                        loadSong(actualIndex);
-                        audio.play();
-                    }
-                };
-
-                let playlistOptions = `<option value="">Adicionar à...</option>`;
-                Object.keys(playlists).forEach(plName => {
-                    const isInPl = playlists[plName].has(song.id);
-                    playlistOptions += `<option value="${plName}" ${isInPl ? 'disabled' : ''}>${plName}</option>`;
-                });
-
-                let actionButtonsHtml = `
-                    <button onclick="toggleFavorite('${song.id}')" class="star-btn p-2 rounded-full hover:bg-zinc-700 transition-colors ${isFav ? 'active' : 'text-zinc-400'}" title="${isFav ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}">
-                        <svg class="w-5 h-5" fill="${isFav ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>
-                    </button>
-                    <select onchange="addToPlaylist('${song.id}', this.value); this.value='';" class="bg-zinc-800 text-xs text-zinc-300 rounded-lg px-2 py-2 border border-zinc-700 focus:outline-none focus:border-green-500 cursor-pointer hover:bg-zinc-700 transition-colors">
-                        ${playlistOptions}
-                    </select>
-                `;
-
-                // Adiciona botão de remover se estiver em uma playlist criada pelo usuário
-                if (isInCurrentPlaylist) {
-                    actionButtonsHtml += `
-                        <button onclick="removeFromPlaylist('${song.id}', '${currentView}')" class="p-2 rounded-full text-zinc-400 hover:text-red-400 hover:bg-zinc-700 transition-colors" title="Remover da playlist">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                return `
+                    <div class="song-row flex items-center gap-4 p-3 rounded-xl hover:bg-zinc-800/50 cursor-pointer transition-all ${isActive ? 'active' : ''}" onclick="playAtFilteredIndex(${index})">
+                        <div class="w-10 h-10 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-500 flex-shrink-0">
+                            ${isActive && isPlaying ? '🔊' : '▶️'}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-white font-semibold truncate">${song.title}</div>
+                            <div class="text-zinc-500 text-sm truncate">${song.artist}</div>
+                        </div>
+                        <button onclick="event.stopPropagation(); toggleFavorite('${song.id}')" class="fav-btn ${isFav ? 'active' : ''} p-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
                         </button>
-                    `;
-                }
-
-                div.innerHTML = `
-                    <div class="w-8 text-center text-zinc-500 font-mono text-sm">
-                        ${isCurrent && isPlaying ? 
-                            '<span class="text-green-500">♫</span>' : 
-                            `<span class="group-hover:hidden">${index + 1}</span><span class="hidden group-hover:block text-white">▶</span>`
-                        }
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-white font-medium truncate ${isCurrent ? 'text-green-400' : ''}">${song.name}</div>
-                        <div class="text-zinc-500 text-xs truncate">${song.path}</div>
-                    </div>
-                    <div class="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        ${actionButtonsHtml}
                     </div>
                 `;
-                playlistContainer.appendChild(div);
-            });
-            playlistContainer.scrollTop = scrollPos;
+            }).join('');
         }
 
-        function loadSong(index, autoPlay = true) {
-            if (index < 0 || index >= songs.length) return;
+        // Toca baseado no índice da lista FILTRADA
+        function playAtFilteredIndex(index) {
+            if (index < 0 || index >= filteredSongs.length) return;
             currentIndex = index;
-            const song = songs[index];
-            
+            const song = filteredSongs[index];
             audio.src = song.url;
-            currentSongTitle.textContent = song.title || song.name;
-            
-            // Atualiza metadados (artista e álbum)
-            const currentSongMeta = document.getElementById('currentSongMeta');
-            if (song.artist || song.album) {
-                currentSongMeta.innerHTML = `🎵 ${song.title || 'Desconhecido'} | 🎤 ${song.artist || 'Desconhecido'} | 💿 ${song.album || 'Desconhecido'}`;
-            } else {
-                currentSongMeta.textContent = '';
-            }
-            
-            currentSongPath.textContent = song.path;
-            
-            renderSongs();
-            
-            if (autoPlay) {
-                audio.play().catch(e => console.log("Autoplay prevented:", e));
-            }
+            currentSongTitle.innerText = song.title;
+            currentSongMeta.innerText = song.artist;
+            playSong();
+            renderSongs(); // Atualiza visualmente qual está ativa
         }
 
-        function togglePlay() {
-            if (songs.length === 0) return;
-            if (audio.paused) {
-                audio.play();
-            } else {
-                audio.pause();
-            }
+        function playSong() { audio.play(); isPlaying = true; updateControls(); }
+        function pauseSong() { audio.pause(); isPlaying = false; updateControls(); }
+        function togglePlay() { 
+            if (filteredSongs.length === 0) return;
+            if (currentIndex === -1) playAtFilteredIndex(0); 
+            else if (isPlaying) pauseSong(); 
+            else playSong(); 
+        }
+
+        function updateControls() {
+            iconPlay.classList.toggle('hidden', isPlaying);
+            iconPause.classList.toggle('hidden', !isPlaying);
         }
 
         function nextSong() {
-            const viewSongs = getCurrentViewSongs();
-            if (viewSongs.length === 0) return;
+            if (filteredSongs.length === 0) return;
             
+            let next;
             if (shuffle) {
-                let randomSong;
-                if (viewSongs.length > 1) {
-                    do {
-                        randomSong = viewSongs[Math.floor(Math.random() * viewSongs.length)];
-                    } while (randomSong.id === songs[currentIndex]?.id);
-                } else {
-                    randomSong = viewSongs[0];
-                }
-                const newIndex = songs.findIndex(s => s.id === randomSong.id);
-                loadSong(newIndex);
+                next = Math.floor(Math.random() * filteredSongs.length);
             } else {
-                const currentViewSong = songs[currentIndex];
-                let currentViewIndex = viewSongs.findIndex(s => s.id === currentViewSong?.id);
-                if (currentViewIndex === -1) currentViewIndex = -1;
-                
-                let nextViewIndex = currentViewIndex + 1;
-                if (nextViewIndex >= viewSongs.length) nextViewIndex = 0;
-                
-                const nextSongObj = viewSongs[nextViewIndex];
-                const newIndex = songs.findIndex(s => s.id === nextSongObj.id);
-                loadSong(newIndex);
+                next = currentIndex + 1;
+                if (next >= filteredSongs.length) next = 0;
             }
+            playAtFilteredIndex(next);
         }
 
         function prevSong() {
-            const viewSongs = getCurrentViewSongs();
-            if (viewSongs.length === 0) return;
+            if (filteredSongs.length === 0) return;
+            let prev = currentIndex - 1;
+            if (prev < 0) prev = filteredSongs.length - 1;
+            playAtFilteredIndex(prev);
+        }
+
+        function formatTime(s) {
+            const m = Math.floor(s / 60);
+            const r = Math.floor(s % 60);
+            return `${m.toString().padStart(2, '0')}:${r.toString().padStart(2, '0')}`;
+        }
+
+        function toggleShuffle() { 
+            shuffle = !shuffle; 
+            document.getElementById('btnShuffle').classList.toggle('text-green-500', shuffle); 
+        }
+        function toggleLoop() { 
+            loop = !loop; 
+            audio.loop = loop; 
+            document.getElementById('btnLoop').classList.toggle('text-green-500', loop); 
+        }
+
+        function toggleFavorite(id) {
+            if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
+            localStorage.setItem('mp3_favs', JSON.stringify([...favorites]));
             
-            if (shuffle) {
-                let randomSong;
-                if (viewSongs.length > 1) {
-                    do {
-                        randomSong = viewSongs[Math.floor(Math.random() * viewSongs.length)];
-                    } while (randomSong.id === songs[currentIndex]?.id);
+            // Se estivermos na view de favoritos e removermos o favorito, a lista muda
+            if (currentView === 'favorites') {
+                applyFilter();
+            } else {
+                // Apenas atualiza o ícone na lista atual
+                renderSongs();
+                updateTabStyles(); // Atualiza o coração da aba se necessário
+            }
+        }
+
+        function setView(view, artistName = null) {
+            currentView = view;
+            currentArtistFilter = artistName;
+            
+            // Limpa a busca de texto ao mudar de aba principal para não confundir
+            if (view === 'all' || view === 'favorites') {
+                searchQuery = '';
+                document.getElementById('searchInput').value = '';
+            }
+            
+            applyFilter();
+            updateArtists(); // Para atualizar o estilo "ativo" na sidebar se necessário
+            
+            // Tocar automaticamente se houver músicas e nada estiver tocando ou se mudou de contexto
+            if (filteredSongs.length > 0) {
+                // Se já estava tocando algo fora do contexto atual, troca.
+                // Se estava pausado, também inicia para dar feedback do clique.
+                if (currentIndex === -1 || !isPlaying) {
+                     playAtFilteredIndex(0);
                 } else {
-                    randomSong = viewSongs[0];
+                    // Se já estava tocando, verificamos se a música atual pertence ao novo filtro.
+                    // Se não pertencer, toca a primeira do novo filtro.
+                    // Melhor lógica: Ao mudar de view, o currentIndex fica inválido para a nova lista.
+                    // Então sempre começamos do 0 ou mantemos se a música existir na nova lista.
+                    // Para simplificar e atender o pedido "ao clicar toca":
+                    playAtFilteredIndex(0);
                 }
-                const newIndex = songs.findIndex(s => s.id === randomSong.id);
-                loadSong(newIndex);
-            } else {
-                const currentViewSong = songs[currentIndex];
-                let currentViewIndex = viewSongs.findIndex(s => s.id === currentViewSong?.id);
-                if (currentViewIndex === -1) currentViewIndex = viewSongs.length;
-                
-                let prevViewIndex = currentViewIndex - 1;
-                if (prevViewIndex < 0) prevViewIndex = viewSongs.length - 1;
-                
-                const prevSongObj = viewSongs[prevViewIndex];
-                const newIndex = songs.findIndex(s => s.id === prevSongObj.id);
-                loadSong(newIndex);
             }
         }
 
-        function toggleShuffle() {
-            shuffle = !shuffle;
-            document.getElementById('btnShuffle').classList.toggle('text-green-500', shuffle);
-            document.getElementById('btnShuffle').classList.toggle('text-zinc-400', !shuffle);
-        }
+        function updateTabStyles() {
+            const tabAll = document.getElementById('tab-all');
+            const tabFav = document.getElementById('tab-favorites');
+            const heartIcon = tabFav.querySelector('svg');
 
-        function toggleLoop() {
-            loop = !loop;
-            audio.loop = loop;
-            document.getElementById('btnLoop').classList.toggle('text-green-500', loop);
-            document.getElementById('btnLoop').classList.toggle('text-zinc-400', !loop);
-        }
-
-        function toggleFavorite(songId) {
-            if (favorites.has(songId)) {
-                favorites.delete(songId);
-            } else {
-                favorites.add(songId);
-            }
-            saveToStorage();
-            renderSongs();
-        }
-
-        function showCreatePlaylist() {
-            document.getElementById('btnNewPlaylist').classList.add('hidden');
-            document.getElementById('newPlaylistContainer').classList.remove('hidden');
-            document.getElementById('newPlaylistInput').focus();
-        }
-
-        function cancelCreatePlaylist() {
-            document.getElementById('newPlaylistContainer').classList.add('hidden');
-            document.getElementById('btnNewPlaylist').classList.remove('hidden');
-            document.getElementById('newPlaylistInput').value = '';
-        }
-
-        function confirmCreatePlaylist() {
-            const input = document.getElementById('newPlaylistInput');
-            const name = input.value.trim();
-            if (name) {
-                if (playlists[name]) {
-                    alert("Já existe uma playlist com este nome.");
-                    return;
-                }
-                playlists[name] = new Set();
-                saveToStorage();
-                renderTabs();
-                cancelCreatePlaylist();
+            if (currentView === 'all') {
+                tabAll.classList.add('bg-zinc-800', 'text-white');
+                tabAll.classList.remove('text-zinc-400');
+                tabFav.classList.remove('bg-zinc-800', 'text-red-500');
+                tabFav.classList.add('text-zinc-400');
+                // Coração vazio
+                heartIcon.setAttribute('fill', 'none');
+                heartIcon.setAttribute('stroke', 'currentColor');
+            } else if (currentView === 'favorites') {
+                tabFav.classList.add('bg-zinc-800', 'text-red-500');
+                tabFav.classList.remove('text-zinc-400');
+                tabAll.classList.remove('bg-zinc-800', 'text-white');
+                tabAll.classList.add('text-zinc-400');
+                // Coração preenchido
+                heartIcon.setAttribute('fill', '#ef4444');
+                heartIcon.setAttribute('stroke', '#ef4444');
             }
         }
 
-        function deletePlaylist(name) {
-            if (confirm(`Deseja excluir a playlist "${name}"?`)) {
-                delete playlists[name];
-                if (currentView === name) currentView = 'all';
-                saveToStorage();
-                renderTabs();
-                renderSongs();
+        function filterSongs() { 
+            searchQuery = document.getElementById('searchInput').value; 
+            applyFilter(); 
+        }
+
+        // Funções da Sidebar de Artistas
+        function updateArtists() {
+            const artistsMap = {};
+            songs.forEach(s => {
+                artistsMap[s.artist] = (artistsMap[s.artist] || 0) + 1;
+            });
+            
+            const artists = Object.entries(artistsMap).sort((a, b) => a[0].localeCompare(b[0]));
+            document.getElementById('artistCount').innerText = `${artists.length} artistas`;
+            
+            renderArtistsList(artists);
+        }
+
+        function renderArtistsList(artists) {
+            const container = document.getElementById('artistsList');
+            const searchTerm = artistSearchInput.value.toLowerCase();
+            
+            const filtered = artists.filter(([name]) => name.toLowerCase().includes(searchTerm));
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<p class="text-center text-zinc-500 py-4 text-xs">Nenhum artista encontrado</p>';
+                return;
             }
+
+            // Botão "Todos" sempre no topo
+            let html = `
+                <button onclick="setView('all')" 
+                    class="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold flex justify-between items-center transition-colors ${currentView === 'all' ? 'bg-green-900/30 text-green-400' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}">
+                    <span>✓ Todos</span>
+                    <span class="text-xs opacity-70">(${songs.length})</span>
+                </button>
+                <div class="border-t border-zinc-800 my-1"></div>
+            `;
+
+            filtered.forEach(([name, count]) => {
+                const isActive = (currentView === 'artist' && currentArtistFilter === name);
+                html += `
+                    <button onclick="setView('artist', '${name.replace(/'/g, "\\'")}')" 
+                        class="w-full text-left px-3 py-2 rounded-lg text-sm flex justify-between items-center transition-colors ${isActive ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'}">
+                        <span class="truncate mr-2">${name}</span>
+                        <span class="text-xs opacity-50 flex-shrink-0">(${count})</span>
+                    </button>
+                `;
+            });
+
+            container.innerHTML = html;
         }
 
-        function addToPlaylist(songId, playlistName) {
-            if (!playlistName || !playlists[playlistName]) return;
-            playlists[playlistName].add(songId);
-            saveToStorage();
-            renderSongs();
+        function filterArtists() {
+            updateArtists(); // Re-renderiza a lista de artistas baseada no input
         }
 
-        function removeFromPlaylist(songId, playlistName) {
-            if (!playlistName || !playlists[playlistName]) return;
-            if (confirm(`Deseja remover esta música da playlist "${playlistName}"?`)) {
-                playlists[playlistName].delete(songId);
-                saveToStorage();
-                renderSongs();
-            }
+        async function clearLibrary() {
+            if (!confirm("Remover todas as músicas salvas?")) return;
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            transaction.objectStore(STORE_NAME).clear();
+            transaction.oncomplete = () => { 
+                songs = []; 
+                filteredSongs = [];
+                currentIndex = -1;
+                audio.pause();
+                renderSongs(); 
+                updateArtists(); 
+                updateCacheStatus("Biblioteca vazia"); 
+                currentSongTitle.innerText = "Pronto para tocar";
+                currentSongMeta.innerText = "";
+            };
         }
 
-        audio.addEventListener('play', () => {
-            isPlaying = true;
-            iconPlay.classList.add('hidden');
-            iconPause.classList.remove('hidden');
-            renderSongs();
-        });
+        function updateCacheStatus(t) { cacheStatus.innerText = t; }
 
-        audio.addEventListener('pause', () => {
-            isPlaying = false;
-            iconPlay.classList.remove('hidden');
-            iconPause.classList.add('hidden');
-            renderSongs();
-        });
-
-        audio.addEventListener('ended', () => {
-            if (!loop) nextSong();
-        });
-
-        audio.addEventListener('timeupdate', () => {
-            if (audio.duration) {
-                progress.max = audio.duration;
-                progress.value = audio.currentTime;
-                currentTimeEl.textContent = formatTime(audio.currentTime);
-                durationEl.textContent = formatTime(audio.duration);
-            }
-        });
-
-        audio.addEventListener('loadedmetadata', () => {
-            durationEl.textContent = formatTime(audio.duration);
-        });
-
-        progress.addEventListener('input', function() {
-            audio.currentTime = this.value;
-        });
-
-        volumeSlider.addEventListener('input', function() {
-            audio.volume = this.value;
-        });
-
-        function formatTime(seconds) {
-            if (isNaN(seconds)) return "00:00";
-            const min = Math.floor(seconds / 60);
-            const sec = Math.floor(seconds % 60);
-            return String(min).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
-        }
-
-        init();
+        window.onload = init;
     </script>
 </body>
 </html>
-
