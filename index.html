@@ -256,70 +256,30 @@
             });
         }
 
-      async function init() {
-    try {
-        await initDB();
-        const saved = await loadFromDB();
+        async function init() {
+            try {
+                await initDB();
+                const saved = await loadFromDB();
 
-        if (saved.length > 0) {
-            songs = saved.map(s => ({
-                ...s,
-                url: URL.createObjectURL(s.file)
-            }));
-            updateCacheStatus(`✓ ${songs.length} músicas carregadas da memória`);
-            applyFilter(); // Aplica filtro inicial e renderiza
-            updateArtists();
-        }
+                if (saved.length > 0) {
+                    songs = saved.map(s => ({
+                        ...s,
+                        url: URL.createObjectURL(s.file)
+                    }));
+                    updateCacheStatus(`✓ ${songs.length} músicas carregadas da memória`);
+                    applyFilter(); // Aplica filtro inicial e renderiza
+                    updateArtists();
+                }
 
-        const favs = localStorage.getItem('mp3_favs');
-        if (favs) favorites = new Set(JSON.parse(favs));
+                const favs = localStorage.getItem('mp3_favs');
+                if (favs) favorites = new Set(JSON.parse(favs));
 
-        // ===== COLOQUE O CÓDIGO DE INSTALAÇÃO AQUI =====
-        let deferredPrompt;
-        
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            
-            const installButton = document.getElementById('installButton');
-            if (installButton) {
-                installButton.style.display = 'block';
-                installButton.addEventListener('click', () => {
-                    deferredPrompt.prompt();
-                    deferredPrompt.userChoice.then((choiceResult) => {
-                        if (choiceResult.outcome === 'accepted') {
-                            console.log('Usuário aceitou o install prompt');
-                        }
-                        deferredPrompt = null;
-                    });
-                });
+                setupEventListeners();
+            } catch (err) {
+                console.error("Erro na inicialização:", err);
+                updateCacheStatus("Erro ao carregar banco de dados.");
             }
-        });
-
-        const installButton = document.createElement('button');
-        installButton.id = 'installButton';
-        installButton.textContent = 'Instalar App';
-        installButton.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            padding: 10px 15px;
-            background: #3b82f6;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            display: none;
-            z-index: 1000;
-        `;
-        document.body.appendChild(installButton);
-        // ===== FIM DO CÓDIGO DE INSTALAÇÃO =====
-
-        setupEventListeners();
-    } catch (err) {
-        console.error("Erro na inicialização:", err);
-        updateCacheStatus("Erro ao carregar banco de dados.");
-    }
-}
+        }
 
         function setupEventListeners() {
             document.getElementById('fileInput').addEventListener('change', async (e) => {
