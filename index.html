@@ -59,6 +59,13 @@
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; display: none; align-items: center; justify-content: center; }
         .modal-overlay.show { display: flex; }
         .modal-content { background: #18181b; border: 1px solid #3f3f46; border-radius: 12px; padding: 24px; width: 100%; max-width: 400px; }
+        .editor-field { display:block; width:100%; margin-top:6px; padding:10px 11px; border-radius:8px; border:1px solid #3f3f46; background:#27272a; color:#f4f4f5; outline:none; font-size:13px; }
+        .editor-field:focus { border-color:#22c55e; }
+        
+        /* Estilos para o Modal em Lote */
+        .batch-card { background:#27272a; border:1px solid #3f3f46; border-radius:8px; padding:12px; display:flex; gap:12px; align-items:center; transition: all 0.2s; }
+        .batch-card:hover { border-color:#52525b; }
+        .batch-card.selected { border-color:#22c55e; background:rgba(34,197,94,0.1); }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center p-4 md:p-8">
@@ -79,6 +86,50 @@
             <div class="flex justify-end gap-2">
                 <button onclick="closeModal()" class="px-4 py-2 text-sm font-semibold text-zinc-400 hover:text-white transition-colors">Cancelar</button>
                 <button id="modalConfirmBtn" onclick="confirmModal()" class="px-4 py-2 text-sm font-semibold bg-green-500 text-black rounded-lg hover:bg-green-400 transition-colors">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Busca de Capas Individual -->
+    <div id="coverSearchModal" class="modal-overlay">
+        <div class="modal-content max-w-lg">
+            <h3 class="text-lg font-bold text-white mb-2">Selecionar Capa</h3>
+            <p id="coverSearchStatus" class="text-sm text-zinc-400 mb-4">Buscando imagens...</p>
+            <div id="coverSearchResults" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-80 overflow-y-auto pr-2"></div>
+            <div class="flex justify-end mt-6">
+                <button onclick="document.getElementById('coverSearchModal').classList.remove('show')" class="px-4 py-2 text-sm font-semibold text-zinc-400 hover:text-white transition-colors">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Busca em Lote -->
+    <div id="batchCoverModal" class="modal-overlay">
+        <div class="modal-content max-w-2xl w-full">
+            <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-3">
+                <div>
+                    <h3 class="text-lg font-bold text-white">Gerenciador de Capas em Lote</h3>
+                    <p class="text-xs text-zinc-400 mt-1">Mostrando apenas as capas encontradas com sucesso.</p>
+                </div>
+                <button onclick="document.getElementById('batchCoverModal').classList.remove('show')" class="text-zinc-400 hover:text-white">✕</button>
+            </div>
+            
+            <div class="flex gap-2 mb-4">
+                <button onclick="startBatchSearch()" class="flex-1 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold py-2 px-4 rounded-lg">Buscar Capas Faltantes</button>
+                <button onclick="toggleSelectAllBatch()" id="btnSelectAllBatch" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-semibold py-2 px-4 rounded-lg">Selecionar Tudo</button>
+            </div>
+
+            <div id="batchProgress" class="text-xs text-zinc-400 mb-2 hidden">
+                <div class="flex justify-between mb-1"><span id="batchProgressText">Buscando...</span><span id="batchProgressCount">0/0</span></div>
+                <div class="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden"><div id="batchProgressBar" class="bg-green-500 h-full w-0 transition-all"></div></div>
+            </div>
+
+            <div id="batchResults" class="max-h-[50vh] overflow-y-auto space-y-2 pr-2 mb-4">
+                <!-- Injetado via JS -->
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-zinc-800">
+                <button onclick="document.getElementById('batchCoverModal').classList.remove('show')" class="px-4 py-2 text-sm font-semibold text-zinc-400 hover:text-white transition-colors">Cancelar</button>
+                <button onclick="applyBatchCovers()" id="btnApplyBatch" class="px-6 py-2 text-sm font-semibold bg-green-500 text-black rounded-lg hover:bg-green-400 transition-colors shadow-lg shadow-green-900/20">Aplicar Selecionadas</button>
             </div>
         </div>
     </div>
@@ -112,9 +163,13 @@
                         Player MP3
                     </h1>
                 </div>
-                <div class="flex gap-2">
+                <div class="flex flex-wrap gap-2 justify-center">
                     <button onclick="clearLibrary()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold py-3 px-4 rounded-xl transition-all border border-zinc-700 text-sm">
                         Limpar Tudo
+                    </button>
+                    <button onclick="openBatchCoverModal()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold py-3 px-4 rounded-xl transition-all border border-zinc-700 text-sm flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        Gerenciar Capas
                     </button>
                     <label class="cursor-pointer bg-green-600 hover:bg-green-500 text-white font-semibold py-3 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-green-900/20">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
@@ -127,7 +182,6 @@
             <!-- Player Centralizado -->
             <div class="relative bg-zinc-900 p-4 md:p-6 rounded-2xl border border-zinc-800 shadow-xl flex flex-col items-center">
                 
-                <!-- Botões do Canto Superior Direito (Coração e 3 Pontinhos) -->
                 <div class="absolute top-4 right-4 flex gap-1 md:gap-2">
                     <button onclick="toggleFavoriteCurrent()" id="btnFavCurrent" class="fav-btn p-2 rounded-full hover:bg-zinc-800 transition-all" title="Favoritar música atual">
                         <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
@@ -152,7 +206,6 @@
 
                 <audio id="audio"></audio>
 
-                <!-- Barra de Progresso -->
                 <div class="w-full max-w-md mb-4 md:mb-6 px-2">
                     <input type="range" id="progress" value="0" min="0" max="100" class="w-full mb-2">
                     <div class="flex justify-between text-xs text-zinc-400 font-mono">
@@ -161,10 +214,7 @@
                     </div>
                 </div>
 
-                <!-- Controles Perfeitamente Alinhados -->
                 <div class="w-full max-w-md flex justify-center items-center gap-6 md:gap-8 mb-4 md:mb-6 px-2">
-                    
-                    <!-- Aleatório (Setas Cruzadas - Corrigido) -->
                     <button onclick="toggleShuffle()" id="btnShuffle" class="p-2 rounded-full text-zinc-400 hover:text-white transition-all flex-shrink-0">
                         <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
                             <path d="M16 3h5v5"></path>
@@ -175,29 +225,24 @@
                         </svg>
                     </button>
                     
-                    <!-- Anterior -->
                     <button onclick="prevSong()" class="p-2 rounded-full text-white hover:bg-zinc-800 transition-all flex-shrink-0">
                         <svg class="w-7 h-7 md:w-8 md:h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"></path></svg>
                     </button>
                     
-                    <!-- Play/Pause -->
                     <button onclick="togglePlay()" id="btnPlay" class="p-3 rounded-full bg-green-500 text-black hover:bg-green-400 transition-all shadow-lg mx-1 flex-shrink-0 flex items-center justify-center">
                         <svg id="iconPlay" class="w-8 h-8 md:w-9 md:h-9 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
                         <svg id="iconPause" class="w-8 h-8 md:w-9 md:h-9 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg>
                     </button>
                     
-                    <!-- Próximo -->
                     <button onclick="nextSong()" class="p-2 rounded-full text-white hover:bg-zinc-800 transition-all flex-shrink-0">
                         <svg class="w-7 h-7 md:w-8 md:h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"></path></svg>
                     </button>
 
-                    <!-- Repetir (Loop) -->
                     <button onclick="toggleLoop()" id="btnLoop" class="p-2 rounded-full text-zinc-400 hover:text-white transition-all flex-shrink-0">
                         <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
                     </button>
                 </div>
 
-                <!-- Barra de Volume -->
                 <div class="flex items-center gap-3 w-full max-w-md px-2">
                     <svg class="w-4 h-4 md:w-5 md:h-5 text-zinc-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
                     <input type="range" id="volume" min="0" max="1" step="0.01" value="1" class="flex-1">
@@ -220,6 +265,7 @@
                     </button>
                 </div>
 
+                <div id="libraryView">
                 <div class="p-4 border-b border-zinc-800">
                     <input type="text" id="searchInput" oninput="filterSongs()" placeholder="Pesquisar músicas..." class="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 border border-zinc-700 focus:outline-none focus:border-green-500" />
                 </div>
@@ -227,6 +273,104 @@
                 <div id="playlistContainer" class="flex-1 overflow-y-auto p-2 space-y-1">
                     <div class="text-center text-zinc-500 py-12">Nenhuma música carregada.</div>
                 </div>
+                </div>
+
+                <!-- EDITOR DE METADADOS -->
+                <section id="metadataEditorView" class="hidden bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl overflow-hidden flex-col flex-1" style="min-height:400px;">
+                    <div class="p-5 border-b border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                            <h2 class="text-xl font-bold text-white">Editor de Metadados</h2>
+                            <p class="text-sm text-zinc-400 mt-1">Editando as informações da música selecionada.</p>
+                        </div>
+                        <button onclick="toggleMetadataEditor(false)" class="text-sm px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200">Voltar à biblioteca</button>
+                    </div>
+                    
+                    <div class="p-4 md:p-8 flex-1 overflow-y-auto flex justify-center">
+                        <div class="w-full max-w-2xl">
+                            
+                            <div id="editorEmpty" class="h-full min-h-[260px] flex flex-col items-center justify-center text-center text-zinc-500">
+                                <svg class="w-12 h-12 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
+                                <p class="font-medium">Nenhuma música selecionada</p>
+                                <p class="text-xs mt-1">Volte à biblioteca e clique nos 3 pontinhos de uma música para editá-la.</p>
+                            </div>
+
+                            <div id="editorForm" class="hidden space-y-6">
+                                
+                                <!-- 1. TOPO: CAPA E FERRAMENTAS DE IMAGEM -->
+                                <div class="bg-zinc-800/50 p-4 rounded-xl border border-zinc-800 flex flex-col sm:flex-row items-center gap-4">
+                                    <div id="editorCover" class="w-24 h-24 rounded-lg bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0 text-zinc-500 shadow-inner border border-zinc-700">♪</div>
+                                    <div class="flex-1 min-w-0 text-center sm:text-left w-full">
+                                        <div id="editorFileName" class="text-sm font-semibold text-white truncate"></div>
+                                        <div id="editorFileType" class="text-xs text-zinc-500 mt-1">Metadados ID3 para MP3</div>
+                                        
+                                        <!-- Barra de Ferramentas de Imagem -->
+                                        <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-3">
+                                            <button onclick="document.getElementById('editCoverFile').click()" class="px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                                                Alterar
+                                            </button>
+                                            <input id="editCoverFile" type="file" accept="image/*" class="hidden">
+                                            
+                                            <button onclick="openCoverSearchModal()" class="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-lg shadow-green-900/20">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                                Buscar na Internet
+                                            </button>
+                                            
+                                            <button onclick="clearEditorCover()" class="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-red-400 hover:text-red-300 text-xs font-semibold flex items-center gap-1.5 transition-colors border border-zinc-700">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                Remover
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 2. MEIO: PREENCHIMENTO AUTOMÁTICO -->
+                                <div class="bg-zinc-800/30 p-4 rounded-xl border border-zinc-800">
+                                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleSearchBox()">
+                                        <div>
+                                            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                                                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                Preencher dados automaticamente
+                                            </h3>
+                                            <p class="text-xs text-zinc-400 mt-1">Busca título, artista, álbum e capa na internet.</p>
+                                        </div>
+                                        <button class="text-zinc-400 hover:text-white p-1">
+                                            <svg id="searchBoxChevron" class="w-5 h-5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                        </button>
+                                    </div>
+                                    
+                                    <div id="searchBoxContent" class="hidden mt-4 pt-4 border-t border-zinc-800/50 space-y-3">
+                                        <input id="editorSearchArtist" class="editor-field" type="text" placeholder="Nome do artista ou banda (ex.: Stratovarius)">
+                                        <label class="flex items-center gap-2 text-xs text-zinc-400"><input id="editorSearchArtistOnly" type="checkbox" class="accent-green-500"> Pesquisar somente pelo nome da banda (ignorar o título)</label>
+                                        <div class="flex flex-wrap gap-2">
+                                            <button onclick="searchMetadataOnline()" id="editorSearchOnline" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm font-semibold shadow-lg shadow-green-900/20">Buscar na internet</button>
+                                            <button onclick="resetEditorFields()" class="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm">Recarregar dados atuais</button>
+                                        </div>
+                                        <div id="editorSearchStatus" class="text-xs text-zinc-400 min-h-4"></div>
+                                        <div id="editorMatches" class="hidden space-y-2 max-h-40 overflow-y-auto pr-2"></div>
+                                    </div>
+                                </div>
+
+                                <!-- 3. BASE: CAMPOS DE METADADOS -->
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <label class="text-xs text-zinc-400 font-semibold">Título<input id="editTitle" class="editor-field" type="text"></label>
+                                    <label class="text-xs text-zinc-400 font-semibold">Artista<input id="editArtist" class="editor-field" type="text"></label>
+                                    <label class="text-xs text-zinc-400 font-semibold">Álbum<input id="editAlbum" class="editor-field" type="text"></label>
+                                    <label class="text-xs text-zinc-400 font-semibold">Ano<input id="editYear" class="editor-field" type="text" inputmode="numeric" maxlength="4"></label>
+                                    <label class="text-xs text-zinc-400 font-semibold">Gênero<input id="editGenre" class="editor-field" type="text"></label>
+                                    <label class="text-xs text-zinc-400 font-semibold">Número da faixa<input id="editTrack" class="editor-field" type="text" inputmode="numeric"></label>
+                                </div>
+
+                                <!-- 4. RODAPÉ: AÇÕES FINAIS -->
+                                <div class="flex flex-col sm:flex-row gap-2 pt-4 border-t border-zinc-800">
+                                    <button onclick="saveEditedMetadata()" class="flex-1 px-4 py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white font-semibold text-sm shadow-lg shadow-green-900/20">Salvar metadados</button>
+                                    <button onclick="downloadEditedMetadata()" class="px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-sm">Baixar cópia</button>
+                                </div>
+                                <p class="text-[11px] text-zinc-500 leading-relaxed text-center">A gravação cria um novo arquivo MP3 com tags ID3v2.4. O arquivo original no dispositivo não é sobrescrito. Ao salvar na biblioteca, a versão corrigida substitui a cópia armazenada no player.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
     </div>
@@ -240,6 +384,10 @@
         <button onclick="actionCreatePlaylist()">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             Criar Playlist...
+        </button>
+        <button onclick="actionOpenMetadataEditor()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5h2m-1-1v2m-7 4h14M5 14h14M7 18h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/></svg>
+            Editar metadados
         </button>
         <button onclick="actionShareWhatsApp()">
             <svg class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
@@ -267,6 +415,13 @@
         let renderLimit = 200;
         let shuffledQueue = [];
         let queueIndex = 0;
+        let editorSongId = null;
+        let editorCoverBlob = null;
+        let editorCoverObjectUrl = null;
+
+        // Variáveis do Lote
+        let batchSongs = [];
+        let batchSelectedIds = new Set();
 
         let modalAction = null;
         let modalTargetSongId = null;
@@ -436,7 +591,32 @@
                     loadingBar.style.width = `${Math.round((processed / total) * 100)}%`;
 
                     const id = file.webkitRelativePath || file.name;
-                    const songObj = { id, name: file.name.replace(/\.[^/.]+$/, ""), file, title: file.name.replace(/\.[^/.]+$/, ""), artist: "Desconhecido", album: "Desconhecido", picture: null };
+                    const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+                    
+                    let fallbackTitle = fileNameWithoutExt;
+                    let fallbackArtist = "Desconhecido";
+                    
+                    if (fileNameWithoutExt.includes(" - ")) {
+                        const parts = fileNameWithoutExt.split(" - ");
+                        fallbackArtist = parts[0].trim();
+                        fallbackTitle = parts.slice(1).join(" - ").trim();
+                    } else if (fileNameWithoutExt.includes("-")) {
+                        const parts = fileNameWithoutExt.split("-");
+                        if (parts.length === 2 && parts[0].trim().length > 2) {
+                            fallbackArtist = parts[0].trim();
+                            fallbackTitle = parts[1].trim();
+                        }
+                    }
+
+                    const songObj = { 
+                        id, 
+                        name: fileNameWithoutExt, 
+                        file, 
+                        title: fallbackTitle, 
+                        artist: fallbackArtist, 
+                        album: "Desconhecido", 
+                        picture: null 
+                    };
 
                     try {
                         await new Promise(resolve => {
@@ -446,9 +626,12 @@
                             jsmediatags.read(file, {
                                 onSuccess: tag => {
                                     try {
-                                        songObj.title = tag.tags.title || songObj.title;
-                                        songObj.artist = tag.tags.artist || "Desconhecido";
-                                        songObj.album = tag.tags.album || "Desconhecido";
+                                        if (tag.tags.title) songObj.title = tag.tags.title;
+                                        if (tag.tags.artist) songObj.artist = tag.tags.artist;
+                                        if (tag.tags.album) songObj.album = tag.tags.album;
+                                        songObj.year = tag.tags.year || tag.tags.TDRC || tag.tags.date || "";
+                                        songObj.genre = tag.tags.genre || "";
+                                        songObj.track = tag.tags.track || "";
                                         const pic = tag.tags.picture;
                                         if (pic && pic.data && pic.data.length) {
                                             const mime = /^image\//i.test(pic.format || '') ? pic.format : 'image/jpeg';
@@ -604,6 +787,10 @@
                 });
             }
             playSong();
+
+            if (!song.picture) {
+                fetchCoverInBackground(song);
+            }
         }
 
         function getPictureSrc(song) {
@@ -712,6 +899,7 @@
         }
 
         function setView(view, artistName = null, playlistId = null) {
+            toggleMetadataEditor(false);
             currentView = view;
             currentArtistFilter = artistName;
             currentPlaylistId = playlistId;
@@ -835,6 +1023,14 @@
             }
             
             menu.classList.add('show');
+        }
+
+        function actionOpenMetadataEditor() {
+            const menu = document.getElementById('ctxMenu');
+            const songId = menu.dataset.songId || currentSongId;
+            document.querySelectorAll('.context-menu.show').forEach(m => m.classList.remove('show'));
+            document.querySelectorAll('.ctx-trigger').forEach(b => b.classList.remove('text-green-500'));
+            toggleMetadataEditor(true, songId);
         }
 
         function actionAddToPlaylist() {
@@ -968,6 +1164,918 @@
                 currentTimeEl.innerText = "00:00"; durationEl.innerText = "00:00"; progress.value = 0;
                 setView('all');
             };
+        }
+
+        // --- SISTEMA DE LOTE (BATCH) ---
+        function openBatchCoverModal() {
+            document.getElementById('batchCoverModal').classList.add('show');
+            document.getElementById('batchResults').innerHTML = '<div class="text-center text-zinc-500 py-8">Clique em "Buscar Capas Faltantes" para começar.</div>';
+            document.getElementById('batchProgress').classList.add('hidden');
+        }
+
+        async function startBatchSearch() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Buscando...';
+            
+            const progress = document.getElementById('batchProgress');
+            const progressBar = document.getElementById('batchProgressBar');
+            const progressText = document.getElementById('batchProgressText');
+            const progressCount = document.getElementById('batchProgressCount');
+            const resultsContainer = document.getElementById('batchResults');
+            
+            progress.classList.remove('hidden');
+            resultsContainer.innerHTML = '';
+            
+            const songsToSearch = songs.filter(s => !s.picture && s.artist !== 'Desconhecido' && s.album !== 'Desconhecido');
+            
+            if (songsToSearch.length === 0) {
+                resultsContainer.innerHTML = '<div class="text-center text-zinc-500 py-8">Todas as músicas já possuem capa.</div>';
+                btn.disabled = false;
+                btn.textContent = 'Buscar Capas Faltantes';
+                return;
+            }
+
+            const grouped = new Map();
+            songsToSearch.forEach(song => {
+                const key = `${song.artist.trim().toLowerCase()}|||${song.album.trim().toLowerCase()}`;
+                if (!grouped.has(key)) grouped.set(key, { artist: song.artist, album: song.album, songs: [] });
+                grouped.get(key).songs.push(song);
+            });
+
+            const groupsArray = Array.from(grouped.values());
+            batchSongs = [];
+            batchSelectedIds.clear();
+            let processed = 0;
+
+            const cleanString = (str) => String(str || '')
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            for (const group of groupsArray) {
+                processed++;
+                progressText.textContent = `Buscando: ${group.artist} - ${group.album}`;
+                progressCount.textContent = `${processed}/${groupsArray.length}`;
+                progressBar.style.width = `${(processed / groupsArray.length) * 100}%`;
+
+                const targetArtist = cleanString(group.artist);
+                const targetAlbum = cleanString(group.album);
+                
+                const searchTerm = `${group.artist} ${group.album}`;
+                let foundCover = null;
+                let matchSource = null;
+
+                const isValidMatch = (apiArtistText, apiAlbumText) => {
+                    const apiArtist = cleanString(apiArtistText);
+                    const apiAlbum = cleanString(apiAlbumText);
+
+                    const artistOk = apiArtist === targetArtist;
+                    const albumOk = apiAlbum.includes(targetAlbum);
+
+                    return artistOk && albumOk;
+                };
+
+                try {
+                    const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(searchTerm)}&entity=album&limit=15`);
+                    if (itunesRes.ok) {
+                        const itunesData = await itunesRes.json();
+                        const validMatch = (itunesData.results || []).find(item => isValidMatch(item.artistName, item.collectionName));
+                        if (validMatch && validMatch.artworkUrl100) {
+                            foundCover = validMatch.artworkUrl100.replace(/\d+x\d+bb\./, '600x600bb.');
+                            matchSource = 'iTunes';
+                        }
+                    }
+
+                    if (!foundCover) {
+                        const deezerRes = await fetch(`https://api.deezer.com/search/album?q=${encodeURIComponent(searchTerm)}`);
+                        if (deezerRes.ok) {
+                            const deezerData = await deezerRes.json();
+                            const validMatch = (deezerData.data || []).find(item => isValidMatch(item.artist?.name, item.title));
+                            if (validMatch && validMatch.cover_xl) {
+                                foundCover = validMatch.cover_xl;
+                                matchSource = 'Deezer';
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Erro ao buscar lote para:", group.album, err);
+                }
+
+                if (foundCover) {
+                    group.songs.forEach(song => {
+                        batchSongs.push({ song, coverUrl: foundCover, source: matchSource });
+                    });
+                }
+                
+                await new Promise(r => setTimeout(r, 300));
+            }
+
+            progress.classList.add('hidden');
+            btn.disabled = false;
+            btn.textContent = 'Buscar Capas Faltantes';
+
+            if (batchSongs.length === 0) {
+                resultsContainer.innerHTML = '<div class="text-center text-zinc-500 py-8">Nenhuma capa foi encontrada automaticamente para as músicas pendentes.</div>';
+                return;
+            }
+
+            resultsContainer.innerHTML = batchSongs.map((item, index) => `
+                <div class="batch-card" id="batch-card-${index}">
+                    <input type="checkbox" class="w-5 h-5 accent-green-500 rounded border-zinc-600 bg-zinc-800 cursor-pointer" 
+                           onchange="toggleBatchSelection(${index}, this.checked)">
+                    <img src="${item.coverUrl}" class="w-12 h-12 rounded object-cover border border-zinc-700 flex-shrink-0" loading="lazy">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-sm font-semibold text-white truncate">${escapeHtml(item.song.title)}</div>
+                        <div class="text-xs text-zinc-400 truncate">${escapeHtml(item.song.artist)} • ${escapeHtml(item.song.album)}</div>
+                    </div>
+                    <div class="text-[10px] font-bold text-green-500 px-2 py-1 bg-zinc-800 rounded ml-2">${item.source}</div>
+                </div>
+            `).join('');
+            
+            toggleSelectAllBatch();
+        }
+
+        function toggleBatchSelection(index, isChecked) {
+            const songId = batchSongs[index].song.id;
+            const card = document.getElementById(`batch-card-${index}`);
+            
+            if (isChecked) {
+                batchSelectedIds.add(songId);
+                card.classList.add('selected');
+            } else {
+                batchSelectedIds.delete(songId);
+                card.classList.remove('selected');
+            }
+        }
+
+        function toggleSelectAllBatch() {
+            const cards = document.querySelectorAll('.batch-card');
+            const checkboxes = document.querySelectorAll('.batch-card input[type="checkbox"]');
+            const btn = document.getElementById('btnSelectAllBatch');
+            
+            const allSelected = batchSelectedIds.size === batchSongs.length;
+            
+            if (allSelected) {
+                batchSelectedIds.clear();
+                cards.forEach(c => c.classList.remove('selected'));
+                checkboxes.forEach(c => c.checked = false);
+                btn.textContent = 'Selecionar Tudo';
+            } else {
+                batchSongs.forEach(item => batchSelectedIds.add(item.song.id));
+                cards.forEach(c => c.classList.add('selected'));
+                checkboxes.forEach(c => c.checked = true);
+                btn.textContent = 'Desmarcar Tudo';
+            }
+        }
+
+        async function applyBatchCovers() {
+            if (batchSelectedIds.size === 0) {
+                alert("Selecione pelo menos uma capa para aplicar.");
+                return;
+            }
+
+            const btn = document.getElementById('btnApplyBatch');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = `Salvando (0/${batchSelectedIds.size})...`;
+
+            let saved = 0;
+            const selectedItems = batchSongs.filter(item => batchSelectedIds.has(item.song.id));
+
+            for (const item of selectedItems) {
+                try {
+                    const testImg = new Image();
+                    testImg.crossOrigin = "Anonymous";
+                    
+                    await new Promise((resolve, reject) => {
+                        testImg.onload = async () => {
+                            try {
+                                const optimizedBlob = await optimizeImage(testImg, 500);
+                                const song = songs.find(s => s.id === item.song.id);
+                                if (song) {
+                                    releaseCoverUrl(song);
+                                    song.picture = optimizedBlob;
+                                    const stored = { ...song }; delete stored.url;
+                                    await saveToDB(stored);
+                                    
+                                    if (currentSongId === song.id) {
+                                        updateCover(song);
+                                    }
+                                }
+                                resolve();
+                            } catch (e) { reject(e); }
+                        };
+                        testImg.onerror = () => reject(new Error('Falha ao baixar imagem'));
+                        testImg.src = item.coverUrl;
+                    });
+
+                    saved++;
+                    btn.textContent = `Salvando (${saved}/${batchSelectedIds.size})...`;
+                } catch (err) {
+                    console.warn("Erro ao salvar capa em lote:", item.song.title, err);
+                }
+            }
+
+            btn.disabled = false;
+            btn.textContent = originalText;
+            
+            renderSongs();
+            alert(`${saved} capas foram atualizadas com sucesso!`);
+            document.getElementById('batchCoverModal').classList.remove('show');
+        }
+
+        // --- BUSCA EM BACKGROUND ---
+        let backgroundSearchInProgress = false;
+
+        async function fetchCoverInBackground(song) {
+            if (song.picture || backgroundSearchInProgress || song.artist === 'Desconhecido' || song.album === 'Desconhecido') return;
+            
+            backgroundSearchInProgress = true;
+            
+            try {
+                const cleanString = (str) => String(str || '')
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                const targetArtist = cleanString(song.artist);
+                const targetAlbum = cleanString(song.album);
+                const searchTerm = `${song.artist} ${song.album}`;
+
+                const isValidMatch = (apiArtistText, apiAlbumText) => {
+                    const apiArtist = cleanString(apiArtistText);
+                    const apiAlbum = cleanString(apiAlbumText);
+
+                    const artistOk = apiArtist === targetArtist;
+                    const albumOk = apiAlbum.includes(targetAlbum);
+
+                    return artistOk && albumOk;
+                };
+
+                let coverUrl = null;
+
+                try {
+                    const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(searchTerm)}&entity=album&limit=5`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        const match = (data.results || []).find(item => isValidMatch(item.artistName, item.collectionName));
+                        if (match && match.artworkUrl100) {
+                            coverUrl = match.artworkUrl100.replace(/\d+x\d+bb\./, '600x600bb.');
+                        }
+                    }
+                } catch (e) { /* Silencioso */ }
+
+                if (!coverUrl) {
+                    try {
+                        const res = await fetch(`https://api.deezer.com/search/album?q=${encodeURIComponent(searchTerm)}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            const match = (data.data || []).find(item => isValidMatch(item.artist?.name, item.title));
+                            if (match && match.cover_xl) coverUrl = match.cover_xl;
+                        }
+                    } catch (e) { /* Silencioso */ }
+                }
+
+                if (coverUrl) {
+                    const testImg = new Image();
+                    testImg.crossOrigin = "Anonymous";
+                    
+                    await new Promise((resolve) => {
+                        testImg.onload = async () => {
+                            try {
+                                const optimizedBlob = await optimizeImage(testImg, 500);
+                                const currentSong = songs.find(s => s.id === song.id);
+                                
+                                if (currentSong && !currentSong.picture) {
+                                    releaseCoverUrl(currentSong);
+                                    currentSong.picture = optimizedBlob;
+                                    
+                                    const stored = { ...currentSong }; delete stored.url;
+                                    await saveToDB(stored);
+                                    
+                                    if (currentSongId === currentSong.id) {
+                                        updateCover(currentSong);
+                                    }
+                                    renderSongs();
+                                }
+                            } catch (e) { /* Silencioso */ }
+                            resolve();
+                        };
+                        testImg.onerror = () => resolve();
+                        testImg.src = coverUrl;
+                    });
+                }
+            } catch (err) {
+                // Ignora erros de conexão
+            } finally {
+                backgroundSearchInProgress = false;
+            }
+        }
+
+        // --- EDITOR INDIVIDUAL ---
+        function toggleMetadataEditor(show, songId = null) {
+            const library = document.getElementById('libraryView');
+            const editor = document.getElementById('metadataEditorView');
+            library.classList.toggle('hidden', show);
+            editor.classList.toggle('hidden', !show);
+            editor.classList.toggle('flex', show);
+            if (show) {
+                const targetId = songId || editorSongId;
+                if (targetId && songs.some(song => song.id === targetId && /\.mp3$/i.test(song.file?.name || song.id || ''))) {
+                    selectEditorSong(targetId);
+                } else {
+                    document.getElementById('editorEmpty').classList.remove('hidden');
+                    document.getElementById('editorForm').classList.add('hidden');
+                }
+            }
+        }
+
+        function toggleSearchBox() {
+            const content = document.getElementById('searchBoxContent');
+            const chevron = document.getElementById('searchBoxChevron');
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                content.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function selectEditorSong(id) {
+            const song = songs.find(item => item.id === id);
+            if (!song) return;
+            editorSongId = id;
+            
+            document.getElementById('editorEmpty').classList.add('hidden');
+            document.getElementById('editorForm').classList.remove('hidden');
+            
+            document.getElementById('editorFileName').textContent = song.file?.name || song.name || song.id;
+            document.getElementById('editorFileType').textContent = 'Arquivo MP3 • tags ID3';
+            document.getElementById('editorSearchStatus').textContent = '';
+            document.getElementById('editorMatches').classList.add('hidden');
+            document.getElementById('editCoverFile').value = '';
+            editorCoverBlob = song.picture instanceof Blob ? song.picture : null;
+            updateEditorCoverPreview();
+            document.getElementById('editTitle').value = song.title || song.name || '';
+            document.getElementById('editArtist').value = song.artist === 'Desconhecido' ? '' : (song.artist || '');
+            document.getElementById('editorSearchArtist').value = song.artist === 'Desconhecido' ? '' : (song.artist || '');
+            document.getElementById('editAlbum').value = song.album === 'Desconhecido' ? '' : (song.album || '');
+            document.getElementById('editYear').value = song.year || '';
+            document.getElementById('editGenre').value = song.genre || '';
+            document.getElementById('editTrack').value = song.track || '';
+            readAdditionalEditorTags(song);
+        }
+
+        function resetEditorFields() {
+            if (editorSongId) selectEditorSong(editorSongId);
+        }
+
+        function readAdditionalEditorTags(song) {
+            if (!song?.file || (song.year && song.genre && song.track)) return;
+            jsmediatags.read(song.file, {
+                onSuccess: tag => {
+                    if (editorSongId !== song.id) return;
+                    const tags = tag.tags || {};
+                    if (!document.getElementById('editYear').value) document.getElementById('editYear').value = tags.year || tags.TDRC || tags.date || '';
+                    if (!document.getElementById('editGenre').value) document.getElementById('editGenre').value = tags.genre || '';
+                    if (!document.getElementById('editTrack').value) document.getElementById('editTrack').value = tags.track || '';
+                    if (!editorCoverBlob && tags.picture?.data?.length) {
+                        const mime = /^image\//i.test(tags.picture.format || '') ? tags.picture.format : 'image/jpeg';
+                        editorCoverBlob = new Blob([new Uint8Array(tags.picture.data)], { type: mime });
+                        updateEditorCoverPreview();
+                    }
+                },
+                onError: () => {}
+            });
+        }
+
+        let editorCoverPreviewToken = 0;
+        function updateEditorCoverPreview() {
+            const box = document.getElementById('editorCover');
+            const token = ++editorCoverPreviewToken;
+            if (editorCoverObjectUrl) { URL.revokeObjectURL(editorCoverObjectUrl); editorCoverObjectUrl = null; }
+            box.innerHTML = '';
+            if (!editorCoverBlob) { box.textContent = '♪'; return; }
+
+            const img = document.createElement('img');
+            img.className = 'w-full h-full object-cover';
+            img.alt = 'Capa do álbum';
+            img.onload = () => {
+                if (token !== editorCoverPreviewToken) return;
+                img.dataset.loaded = 'true';
+                img.title = `${img.naturalWidth} × ${img.naturalHeight}`;
+            };
+            img.onerror = () => {
+                if (token !== editorCoverPreviewToken) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    if (token !== editorCoverPreviewToken) return;
+                    img.onerror = () => {
+                        if (token !== editorCoverPreviewToken) return;
+                        box.innerHTML = '<span class="text-[10px] text-red-400 text-center p-1">Não foi possível carregar esta imagem. Tente outro JPEG ou PNG.</span>';
+                    };
+                    img.src = String(reader.result || '');
+                };
+                reader.onerror = () => {
+                    if (token === editorCoverPreviewToken) box.innerHTML = '<span class="text-[10px] text-red-400 text-center p-1">Falha ao ler a imagem.</span>';
+                };
+                reader.readAsDataURL(editorCoverBlob);
+            };
+            editorCoverObjectUrl = URL.createObjectURL(editorCoverBlob);
+            img.src = editorCoverObjectUrl;
+            box.appendChild(img);
+        }
+
+        function clearEditorCover() {
+            editorCoverBlob = null;
+            document.getElementById('editCoverFile').value = '';
+            updateEditorCoverPreview();
+        }
+
+        document.getElementById('editCoverFile').addEventListener('change', async event => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const status = document.getElementById('editorSearchStatus');
+            const looksLikeImage = /^image\//i.test(file.type) || /\.(jpe?g|png|webp|gif|bmp)$/i.test(file.name || '');
+            
+            if (!looksLikeImage) {
+                alert('Selecione uma imagem JPEG, PNG ou WebP.');
+                event.target.value = '';
+                return;
+            }
+
+            status.textContent = 'Otimizando imagem...';
+            
+            try {
+                const optimizedBlob = await optimizeImage(file, 500);
+                editorCoverBlob = optimizedBlob;
+                updateEditorCoverPreview();
+                status.textContent = `Capa otimizada e carregada. Confira a prévia antes de salvar.`;
+            } catch (err) {
+                console.error(err);
+                event.target.value = '';
+                status.textContent = 'O arquivo foi selecionado, mas não é uma imagem válida ou está danificado.';
+            }
+        });
+
+        async function searchMetadataOnline() {
+            const song = songs.find(item => item.id === editorSongId);
+            if (!song) return;
+            const artistOnly = document.getElementById('editorSearchArtistOnly').checked;
+            const title = artistOnly ? '' : (document.getElementById('editTitle').value.trim() || song.title || song.name || '');
+            const artist = document.getElementById('editorSearchArtist').value.trim() || document.getElementById('editArtist').value.trim() || (song.artist === 'Desconhecido' ? '' : song.artist || '');
+            if (!title && !artist) { alert('Informe o título da música ou o nome da banda/artista para pesquisar.'); return; }
+            const status = document.getElementById('editorSearchStatus');
+            const matchesBox = document.getElementById('editorMatches');
+            status.textContent = artist && !title ? 'Pesquisando pelo nome da banda/artista...' : 'Consultando MusicBrainz...';
+            matchesBox.classList.add('hidden');
+            try {
+                const clean = value => String(value || '').replace(/["\\]/g, ' ').trim();
+                const parts = [];
+                if (title) parts.push(`recording:"${clean(title)}"`);
+                if (artist) parts.push(`artist:"${clean(artist)}"`);
+                const query = parts.join(' AND ');
+                const url = `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=${artist && !title ? 25 : 10}&inc=releases`;
+                const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                if (!response.ok) throw new Error(`MusicBrainz respondeu ${response.status}`);
+                const data = await response.json();
+                const matches = data.recordings || [];
+                if (!matches.length) { status.textContent = 'Nenhum resultado encontrado. Confira o nome da banda ou tente outra grafia.'; return; }
+                matchesBox.innerHTML = matches.map((match, index) => {
+                    const artists = (match['artist-credit'] || []).map(a => a.name || a.artist?.name || '').filter(Boolean).join(', ');
+                    const release = match.releases?.[0];
+                    const year = (release?.date || '').slice(0, 4);
+                    return `<button onclick="applyMusicBrainzMatch(${index})" class="w-full text-left p-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700"><span class="block text-sm font-semibold text-white">${escapeHtml(match.title || 'Sem título')}</span><span class="block text-xs text-zinc-300 mt-1">${escapeHtml(artists || 'Artista desconhecido')} ${release?.title ? ' • ' + escapeHtml(release.title) : ''} ${year ? ' • ' + year : ''}</span></button>`;
+                }).join('');
+                window._editorMusicBrainzMatches = matches;
+                matchesBox.classList.remove('hidden');
+                status.textContent = `${matches.length} resultado(s). Escolha a versão correta:`;
+            } catch (error) {
+                console.error(error);
+                status.textContent = 'Não foi possível consultar a base agora. Verifique sua conexão ou preencha manualmente.';
+            }
+        }
+
+        async function loadValidCoverImage(url) {
+            const response = await fetch(url, { mode: 'cors', cache: 'no-store' });
+            if (!response.ok) return null;
+            const blob = await response.blob();
+            if (!blob.size) return null;
+            const testUrl = URL.createObjectURL(blob);
+            try {
+                const valid = await new Promise(resolve => {
+                    const img = new Image();
+                    img.onload = () => resolve(true);
+                    img.onerror = () => resolve(false);
+                    img.src = testUrl;
+                });
+                return valid ? blob : null;
+            } finally {
+                URL.revokeObjectURL(testUrl);
+            }
+        }
+
+        async function searchCoverInMusicBrainz(match) {
+            const releases = match.releases || [];
+            for (const release of releases.slice(0, 12)) {
+                const ids = [];
+                if (release.id) ids.push(`release/${release.id}`);
+                if (release['release-group']?.id) ids.push(`release-group/${release['release-group'].id}`);
+                for (const id of ids) {
+                    try {
+                        const blob = await loadValidCoverImage(`https://coverartarchive.org/${id}/front-500`);
+                        if (blob) return blob;
+                    } catch (error) { console.warn('Tentativa de capa no Cover Art Archive falhou:', id, error); }
+                }
+            }
+            return null;
+        }
+
+        async function searchCoverInITunes(artist, album, title) {
+            const term = [artist, album || title].filter(Boolean).join(' ');
+            if (!term.trim()) return null;
+            const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=album&limit=8`;
+            const response = await fetch(url, { mode: 'cors', cache: 'no-store' });
+            if (!response.ok) return null;
+            const data = await response.json();
+            const results = data.results || [];
+            const normalizedArtist = (artist || '').toLowerCase();
+            const normalizedAlbum = (album || '').toLowerCase();
+            results.sort((a, b) => {
+                const score = item => {
+                    let value = 0;
+                    if (normalizedArtist && (item.artistName || '').toLowerCase().includes(normalizedArtist)) value += 2;
+                    if (normalizedAlbum && (item.collectionName || '').toLowerCase() === normalizedAlbum) value += 4;
+                    else if (normalizedAlbum && (item.collectionName || '').toLowerCase().includes(normalizedAlbum)) value += 2;
+                    return value;
+                };
+                return score(b) - score(a);
+            });
+            for (const item of results) {
+                const imageUrl = (item.artworkUrl600 || item.artworkUrl100 || '').replace(/\d+x\d+bb\./, '600x600bb.');
+                if (!imageUrl) continue;
+                try {
+                    const blob = await loadValidCoverImage(imageUrl);
+                    if (blob) return blob;
+                } catch (error) { console.warn('Capa indisponível no iTunes:', error); }
+            }
+            return null;
+        }
+
+        async function searchCoverInDeezer(artist, album, title) {
+            const term = [artist, album || title].filter(Boolean).join(' ');
+            if (!term.trim()) return null;
+            const response = await fetch(`https://api.deezer.com/search/album?q=${encodeURIComponent(term)}`, { mode: 'cors', cache: 'no-store' });
+            if (!response.ok) return null;
+            const data = await response.json();
+            const results = data.data || [];
+            const normalizedArtist = (artist || '').toLowerCase();
+            const normalizedAlbum = (album || '').toLowerCase();
+            results.sort((a, b) => {
+                const score = item => {
+                    let value = 0;
+                    if (normalizedArtist && (item.artist?.name || '').toLowerCase().includes(normalizedArtist)) value += 2;
+                    if (normalizedAlbum && (item.title || '').toLowerCase() === normalizedAlbum) value += 4;
+                    else if (normalizedAlbum && (item.title || '').toLowerCase().includes(normalizedAlbum)) value += 2;
+                    return value;
+                };
+                return score(b) - score(a);
+            });
+            for (const item of results) {
+                const imageUrl = item.cover_xl || item.cover_big || item.cover_medium;
+                if (!imageUrl) continue;
+                try {
+                    const blob = await loadValidCoverImage(imageUrl);
+                    if (blob) return blob;
+                } catch (error) { console.warn('Capa indisponível no Deezer:', error); }
+            }
+            return null;
+        }
+
+        async function applyMusicBrainzMatch(index) {
+            const match = window._editorMusicBrainzMatches?.[index];
+            if (!match) return;
+            const artists = (match['artist-credit'] || []).map(a => a.name || a.artist?.name || '').filter(Boolean).join(', ');
+            const releases = match.releases || [];
+            const release = releases[0];
+            
+            document.getElementById('editTitle').value = match.title || '';
+            document.getElementById('editArtist').value = artists;
+            document.getElementById('editorSearchArtist').value = artists;
+            document.getElementById('editAlbum').value = release?.title || '';
+            document.getElementById('editYear').value = (release?.date || '').slice(0, 4);
+            
+            const status = document.getElementById('editorSearchStatus');
+            status.textContent = 'Dados preenchidos. Procurando a capa em várias fontes...';
+            document.getElementById('editorMatches').classList.add('hidden');
+
+            let cover = null;
+            try { cover = await searchCoverInMusicBrainz(match); }
+            catch (error) { console.warn('Busca no Cover Art Archive falhou:', error); }
+
+            if (!cover) {
+                status.textContent = 'Não achei no MusicBrainz. Tentando Apple/iTunes...';
+                try { cover = await searchCoverInITunes(artists, release?.title || '', match.title || ''); }
+                catch (error) { console.warn('Busca no iTunes falhou:', error); }
+            }
+            if (!cover) {
+                status.textContent = 'Ainda procurando. Tentando Deezer...';
+                try { cover = await searchCoverInDeezer(artists, release?.title || '', match.title || ''); }
+                catch (error) { console.warn('Busca no Deezer falhou:', error); }
+            }
+
+            if (cover) {
+                editorCoverBlob = cover;
+                updateEditorCoverPreview();
+                status.textContent = 'Dados e capa encontrados. Confira a imagem antes de salvar.';
+            } else {
+                status.textContent = 'Dados encontrados, mas nenhuma das fontes retornou uma capa compatível. Você pode adicioná-la manualmente.';
+            }
+        }
+
+        async function openCoverSearchModal() {
+            const artist = document.getElementById('editArtist').value.trim();
+            const album = document.getElementById('editAlbum').value.trim();
+            const title = document.getElementById('editTitle').value.trim();
+            
+            if (!artist && !album) {
+                alert("Preencha pelo menos o Artista ou o Álbum para buscar capas.");
+                return;
+            }
+
+            const modal = document.getElementById('coverSearchModal');
+            const results = document.getElementById('coverSearchResults');
+            const status = document.getElementById('coverSearchStatus');
+            
+            modal.classList.add('show');
+            results.innerHTML = '';
+            status.innerHTML = '<div class="flex items-center gap-2"><svg class="animate-spin h-4 w-4 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Buscando capas...</div>';
+
+            const term = [artist, album || title].filter(Boolean).join(' ');
+            const images = new Set();
+
+            try {
+                try {
+                    const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=album&limit=15`);
+                    if (itunesRes.ok) {
+                        const itunesData = await itunesRes.json();
+                        (itunesData.results || []).forEach(item => {
+                            if (item.artworkUrl100) images.add(item.artworkUrl100.replace(/\d+x\d+bb\./, '600x600bb.'));
+                        });
+                    }
+                } catch (e) { console.warn("Falha no iTunes", e); }
+
+                try {
+                    const deezerRes = await fetch(`https://api.deezer.com/search/album?q=${encodeURIComponent(term)}`);
+                    if (deezerRes.ok) {
+                        const deezerData = await deezerRes.json();
+                        (deezerData.data || []).forEach(item => {
+                            if (item.cover_xl) images.add(item.cover_xl);
+                        });
+                    }
+                } catch (e) { console.warn("Falha no Deezer", e); }
+
+                if (images.size === 0) {
+                    try {
+                        const mbRes = await fetch(`https://musicbrainz.org/ws/2/release/?query=artist:"${encodeURIComponent(artist)}" AND release:"${encodeURIComponent(album || title)}"&fmt=json&limit=10`);
+                        if (mbRes.ok) {
+                            const mbData = await mbRes.json();
+                            const releases = mbData.releases || [];
+                            for (const rel of releases) {
+                                if (rel.id) {
+                                    images.add(`https://coverartarchive.org/release/${rel.id}/front-500`);
+                                }
+                            }
+                        }
+                    } catch (e) { console.warn("Falha no MusicBrainz", e); }
+                }
+
+                const imgArray = Array.from(images);
+                if (imgArray.length === 0) {
+                    status.textContent = 'Nenhuma capa encontrada. Tente preencher o Álbum corretamente.';
+                    return;
+                }
+
+                status.textContent = `${imgArray.length} capas encontradas. Clique para selecionar:`;
+                results.innerHTML = imgArray.map(url => `
+                    <div class="cursor-pointer rounded-lg overflow-hidden border-2 border-transparent hover:border-green-500 transition-all bg-zinc-800" onclick="selectCoverFromUrl('${url}')">
+                        <img src="${url}" class="w-full aspect-square object-cover" loading="lazy" onerror="this.parentElement.style.display='none'">
+                    </div>
+                `).join('');
+
+            } catch (err) {
+                console.error(err);
+                status.textContent = 'Erro de rede ao buscar imagens. Tente novamente.';
+            }
+        }
+
+        async function selectCoverFromUrl(url) {
+            try {
+                const testImg = new Image();
+                testImg.crossOrigin = "Anonymous";
+                
+                testImg.onload = async () => {
+                    try {
+                        const optimizedBlob = await optimizeImage(testImg, 500);
+                        editorCoverBlob = optimizedBlob;
+                        updateEditorCoverPreview();
+                        document.getElementById('coverSearchModal').classList.remove('show');
+                        document.getElementById('editorSearchStatus').textContent = 'Nova capa selecionada. Clique em "Salvar metadados" para confirmar.';
+                    } catch (e) {
+                        alert('Erro ao processar a imagem selecionada.');
+                    }
+                };
+                
+                testImg.onerror = () => {
+                    alert('Não foi possível carregar esta imagem. Tente outra.');
+                };
+                
+                testImg.src = url;
+            } catch (e) {
+                alert('Erro ao carregar a imagem selecionada.');
+            }
+        }
+
+        function optimizeImage(source, maxSize) {
+            return new Promise((resolve, reject) => {
+                const processImage = (img) => {
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > maxSize || height > maxSize) {
+                        if (width > height) {
+                            height = Math.round((height * maxSize) / width);
+                            width = maxSize;
+                        } else {
+                            width = Math.round((width * maxSize) / height);
+                            height = maxSize;
+                        }
+                    }
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    canvas.toBlob((blob) => {
+                        if (blob) resolve(blob);
+                        else reject(new Error('Falha ao comprimir imagem'));
+                    }, 'image/jpeg', 0.85);
+                };
+
+                if (source instanceof Blob || source instanceof File) {
+                    const url = URL.createObjectURL(source);
+                    const img = new Image();
+                    img.onload = () => { URL.revokeObjectURL(url); processImage(img); };
+                    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Imagem inválida')); };
+                    img.src = url;
+                } else if (source instanceof HTMLImageElement) {
+                    processImage(source);
+                } else {
+                    reject(new Error('Fonte de imagem não suportada'));
+                }
+            });
+        }
+
+        function syncSafeInt(value) { return [(value >> 21) & 0x7f, (value >> 14) & 0x7f, (value >> 7) & 0x7f, value & 0x7f]; }
+        function makeId3Frame(id, body) {
+            const size = body.length;
+            return new Uint8Array([...new TextEncoder().encode(id), ...syncSafeInt(size), 0, 0, ...body]);
+        }
+        function encodeId3Text(value) { return new Uint8Array([3, ...new TextEncoder().encode(String(value || ''))]); }
+
+        async function buildTaggedMp3(song) {
+            if (!song?.file || !/\.mp3$/i.test(song.file.name || song.id || '')) throw new Error('O editor de gravação aceita arquivos MP3.');
+            const values = {
+                TIT2: document.getElementById('editTitle').value.trim(),
+                TPE1: document.getElementById('editArtist').value.trim(),
+                TALB: document.getElementById('editAlbum').value.trim(),
+                TDRC: document.getElementById('editYear').value.trim(),
+                TCON: document.getElementById('editGenre').value.trim(),
+                TRCK: document.getElementById('editTrack').value.trim()
+            };
+            const frames = [];
+            for (const [id, value] of Object.entries(values)) if (value) frames.push(makeId3Frame(id, encodeId3Text(value)));
+            if (editorCoverBlob) {
+                const mime = editorCoverBlob.type || 'image/jpeg';
+                const mimeBytes = new TextEncoder().encode(mime);
+                const imageBytes = new Uint8Array(await editorCoverBlob.arrayBuffer());
+                const body = new Uint8Array(1 + mimeBytes.length + 1 + 1 + 1 + imageBytes.length);
+                let offset = 0; body[offset++] = 3; body.set(mimeBytes, offset); offset += mimeBytes.length;
+                body[offset++] = 0; body[offset++] = 3; body[offset++] = 0;
+                body.set(imageBytes, offset);
+                frames.push(makeId3Frame('APIC', body));
+            }
+            const total = frames.reduce((sum, frame) => sum + frame.length, 0);
+            const header = new Uint8Array([0x49,0x44,0x33,4,0,0,...syncSafeInt(total)]);
+            const original = new Uint8Array(await song.file.arrayBuffer());
+            let start = 0, end = original.length;
+            if (original.length >= 10 && original[0] === 0x49 && original[1] === 0x44 && original[2] === 0x33) {
+                const oldSize = ((original[6] & 0x7f) << 21) | ((original[7] & 0x7f) << 14) | ((original[8] & 0x7f) << 7) | (original[9] & 0x7f);
+                start = Math.min(original.length, 10 + oldSize);
+            }
+            if (end >= 128 && original[end-128] === 0x54 && original[end-127] === 0x41 && original[end-126] === 0x47) end -= 128;
+            const audioData = original.slice(start, end);
+            return new Blob([header, ...frames, audioData], { type: 'audio/mpeg' });
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1500);
+        }
+
+        async function downloadEditedMetadata() {
+            const song = songs.find(item => item.id === editorSongId);
+            if (!song) return;
+            try {
+                const blob = await buildTaggedMp3(song);
+                const originalName = song.file.name || `${song.name || 'musica'}.mp3`;
+                const filename = originalName.replace(/\.mp3$/i, '') + '_metadados.mp3';
+                downloadBlob(blob, filename);
+                document.getElementById('editorSearchStatus').textContent = 'Cópia corrigida preparada para download.';
+            } catch (error) { console.error(error); alert(error.message || 'Não foi possível gerar o MP3.'); }
+        }
+
+        async function saveEditedMetadata() {
+            const song = songs.find(item => item.id === editorSongId);
+            if (!song || !db) return;
+            const button = document.querySelector('#editorForm button[onclick="saveEditedMetadata()"]');
+            button.disabled = true; button.textContent = 'Salvando...';
+            
+            try {
+                const blob = await buildTaggedMp3(song);
+                const originalName = song.file.name || `${song.name || 'musica'}.mp3`;
+                const updatedFile = typeof File !== 'undefined' ? new File([blob], originalName, { type: 'audio/mpeg', lastModified: Date.now() }) : blob;
+                const updated = { ...song, file: updatedFile, title: document.getElementById('editTitle').value.trim(), artist: document.getElementById('editArtist').value.trim() || 'Desconhecido', album: document.getElementById('editAlbum').value.trim() || 'Desconhecido', year: document.getElementById('editYear').value.trim(), genre: document.getElementById('editGenre').value.trim(), track: document.getElementById('editTrack').value.trim(), picture: editorCoverBlob };
+                const oldUrl = song.url;
+                updated.url = URL.createObjectURL(updatedFile);
+                const stored = { ...updated }; delete stored.url;
+                await saveToDB(stored);
+                const idx = songs.findIndex(item => item.id === editorSongId);
+                songs[idx] = updated;
+                if (oldUrl) URL.revokeObjectURL(oldUrl);
+                if (currentSongId === updated.id) {
+                    const wasPlaying = !audio.paused; const time = audio.currentTime;
+                    audio.src = updated.url; audio.load();
+                    audio.addEventListener('loadedmetadata', function restorePosition() { audio.removeEventListener('loadedmetadata', restorePosition); if (Number.isFinite(time)) audio.currentTime = Math.min(time, audio.duration || time); if (wasPlaying) audio.play().catch(()=>{}); }, { once: true });
+                    currentSongTitle.innerText = updated.title; currentSongMeta.innerText = `${updated.artist}${updated.album !== 'Desconhecido' ? ' • ' + updated.album : ''}`; updateCover(updated);
+                }
+                applyFilter(); updateArtists(); selectEditorSong(updated.id);
+                
+                if (editorCoverBlob) {
+                    const songsWithSameAlbum = songs.filter(s => 
+                        s.artist === updated.artist && 
+                        s.album === updated.album && 
+                        s.id !== updated.id
+                    );
+                    
+                    if (songsWithSameAlbum.length > 0) {
+                        const applyToAll = confirm(`Deseja aplicar esta capa também às ${songsWithSameAlbum.length} outras músicas do álbum "${updated.album}" de "${updated.artist}"?`);
+                        
+                        if (applyToAll) {
+                            try {
+                                for (const s of songsWithSameAlbum) {
+                                    releaseCoverUrl(s);
+                                    s.picture = editorCoverBlob;
+                                    const storedS = { ...s }; delete storedS.url;
+                                    await saveToDB(storedS);
+                                    
+                                    if (currentSongId === s.id) {
+                                        updateCover(s);
+                                    }
+                                }
+                                renderSongs();
+                                document.getElementById('editorSearchStatus').textContent = `Metadados salvos e capa aplicada a ${songsWithSameAlbum.length + 1} músicas!`;
+                            } catch (err) {
+                                console.error(err);
+                                document.getElementById('editorSearchStatus').textContent = 'Metadados salvos, mas houve um erro ao aplicar a capa em lote.';
+                            }
+                        } else {
+                            document.getElementById('editorSearchStatus').textContent = 'Metadados salvos na biblioteca! O arquivo original do dispositivo foi preservado.';
+                        }
+                    } else {
+                        document.getElementById('editorSearchStatus').textContent = 'Metadados salvos na biblioteca! O arquivo original do dispositivo foi preservado.';
+                    }
+                } else {
+                    document.getElementById('editorSearchStatus').textContent = 'Metadados salvos na biblioteca! O arquivo original do dispositivo foi preservado.';
+                }
+                
+                updateCacheStatus('Metadados atualizados na biblioteca.');
+            } catch (error) { 
+                console.error(error); 
+                alert(error.message || 'Erro ao salvar metadados.'); 
+            } finally { 
+                button.disabled = false; 
+                button.textContent = 'Salvar no MP3 e atualizar biblioteca'; 
+            }
         }
 
         function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
