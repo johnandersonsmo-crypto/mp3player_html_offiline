@@ -60,6 +60,23 @@ input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; cur
 .pending-card .thumb-fallback { width:64px; height:64px; border-radius:10px; background:#27272a; display:flex; align-items:center; justify-content:center; color:#52525b; flex-shrink:0; }
 </style>
 <base target="_blank">
+<style id="patch-css">#tabBar{display:flex;gap:6px;overflow:visible;white-space:nowrap}
+#tabBar>button{flex:1 1 0;min-width:0;justify-content:center;padding:8px 6px!important;font-size:13px!important}
+#tabBar .tl{overflow:hidden;text-overflow:ellipsis;min-width:0}
+#tabBar>button svg{flex-shrink:0}
+#tabBar #pendingBadge{flex-shrink:0;margin-left:2px}
+.tab-on{box-shadow:inset 0 -2px 0 #22c55e}
+.playlists-drop .drop-item .nm{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.playlists-drop .drop-item .count{min-width:34px;text-align:right;flex-shrink:0}
+.playlists-drop .drop-item .delslot{width:20px;text-align:center;flex-shrink:0}
+.playlists-drop .drop-item.fav{background:rgba(239,68,68,.08)}
+.playlists-drop .drop-item.fav .nm{color:#fca5a5;font-weight:600}
+.playlists-drop .drop-item.fav.active{background:rgba(239,68,68,.2)}
+.pending-card{flex-wrap:wrap}
+.pending-card .pc-body{flex:1;min-width:0;overflow-wrap:anywhere}
+.pending-card .pc-actions{width:100%;display:flex;gap:8px}
+.pending-card .pc-actions button{flex:1}
+</style>
 </head>
 <body class="min-h-screen flex flex-col items-center p-4 md:p-8">
 
@@ -1683,6 +1700,169 @@ function optimizeImage(source, maxSize) {
 }
 
 init();
+</script>
+<script id="patch-js">/* PATCH v2 */
+(function(){
+var bar=document.getElementById('tab-all').parentElement;bar.id='tabBar';bar.classList.remove('overflow-x-auto');
+['tab-all','tab-playlists','tab-pending'].forEach(function(id){var b=document.getElementById(id);
+ Array.from(b.childNodes).forEach(function(n){if(n.nodeType===3&&n.textContent.trim()){var s=document.createElement('span');s.className='tl';s.textContent=n.textContent.trim();b.replaceChild(s,n);}});});
+})();
+
+function closeDrop(){document.getElementById('playlistsDrop').classList.remove('show');}
+
+function updateTabStyles(){
+ var on=currentView==='pending'?'tab-pending':(currentView==='playlist'||currentView==='favorites')?'tab-playlists':'tab-all';
+ ['tab-all','tab-playlists','tab-pending'].forEach(function(id){var b=document.getElementById(id),a=id===on;
+  b.classList.toggle('bg-zinc-800',a);b.classList.toggle('text-white',a);b.classList.toggle('text-zinc-400',!a);b.classList.toggle('tab-on',a);});
+ var lab=document.querySelector('#tab-playlists .tl');
+ if(lab){var n='Playlists';if(currentView==='favorites')n='Favoritos';else if(currentView==='playlist'){var p=playlists.find(function(x){return x.id===currentPlaylistId;});if(p)n=p.name;}lab.textContent=n;}
+}
+
+function renderPlaylists(){
+ var drop=document.getElementById('playlistsDrop');
+ var heart='<svg width="14" height="14" viewBox="0 0 24 24" fill="#ef4444" stroke="#ef4444" stroke-width="2"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>';
+ var h='<div class="drop-header">Playlists ('+(playlists.length+1)+')</div>';
+ h+='<div class="drop-item fav '+(currentView==='favorites'?'active':'')+'" onclick="setView(\'favorites\');closeDrop()"><span class="nm">'+heart+'Favoritos</span><span class="count">('+favorites.size+')</span><span class="delslot"></span></div>';
+ playlists.forEach(function(pl){
+  var a=(currentView==='playlist'&&currentPlaylistId===pl.id)?'active':'';
+  h+='<div class="drop-item '+a+'" onclick="setView(\'playlist\',null,\''+pl.id+'\');closeDrop()"><span class="nm">'+escapeHtml(pl.name)+'</span><span class="count">('+pl.songs.length+')</span><span class="delslot"><span class="del" onclick="event.stopPropagation();deletePlaylist(\''+pl.id+'\')">×</span></span></div>';
+ });
+ h+='<div class="drop-footer"><div class="drop-item" onclick="openCreatePlaylistModal();closeDrop()"><span class="text-green-500 font-semibold">+ Nova Playlist</span></div></div>';
+ drop.innerHTML=h;
+}
+
+function togglePlaylistsDrop(event){
+ event.stopPropagation();
+ var drop=document.getElementById('playlistsDrop');
+ if(drop.classList.contains('show')){closeDrop();return;}
+ renderPlaylists();
+ document.body.appendChild(drop);
+ var r=event.currentTarget.getBoundingClientRect(),w=250;
+ drop.style.position='absolute';
+ drop.style.left=(Math.max(10,Math.min(r.left,window.innerWidth-w-10))+window.scrollX)+'px';
+ drop.style.top=(r.bottom+window.scrollY+6)+'px';
+ drop.classList.add('show');
+}
+window.addEventListener('resize',closeDrop);
+
+function loadPending(){
+ return new Promise(function(resolve,reject){
+  var out=[],req=db.transaction([PENDING_STORE],'readonly').objectStore(PENDING_STORE).openCursor();
+  req.onsuccess=function(e){var c=e.target.result;if(c){var v=c.value;delete v._thumbUrl;out.push(v);c.continue();}else resolve(out);};
+  req.onerror=function(){reject(req.error);};
+ });
+}
+function savePendingItem(item){
+ return new Promise(function(resolve,reject){
+  var clean=Object.assign({},item);delete clean._thumbUrl;
+  var req=db.transaction([PENDING_STORE],'readwrite').objectStore(PENDING_STORE).put(clean);
+  req.onsuccess=function(){resolve();};req.onerror=function(){reject(req.error);};
+ });
+}
+
+async function addOrMergePending(n){
+ var eid=editingPendingId;editingPendingId=null;
+ var ex=(eid&&pendingItems.find(function(p){return p.id===eid&&p.songId===n.songId;}))||pendingItems.find(function(p){return p.songId===n.songId;});
+ if(!ex){await savePendingItem(n);await refreshPending();return;}
+ var m=Object.assign({},ex);delete m._thumbUrl;
+ m.type=ex.type===n.type?ex.type:'both';
+ if(n.type==='cover'||n.type==='both'){
+  m.coverBlob=n.coverBlob||m.coverBlob;m.source=n.source;m.coverArtist=n.coverArtist;m.coverAlbum=n.coverAlbum;
+  m.oldArtist=ex.oldArtist||n.oldArtist;m.oldAlbum=ex.oldAlbum||n.oldAlbum;
+ }
+ if(n.type==='metadata'||n.type==='both'){
+  m.newValues=n.newValues;m.oldValues=ex.oldValues||n.oldValues;
+  m.oldArtist=ex.oldArtist||n.oldArtist;m.oldAlbum=ex.oldAlbum||n.oldAlbum;
+ }
+ m.newArtist=n.newArtist||m.newArtist;m.newAlbum=n.newAlbum||m.newAlbum;m.groupKey=n.groupKey||m.groupKey;
+ await savePendingItem(m);await refreshPending();
+}
+
+var _tme=toggleMetadataEditor;
+toggleMetadataEditor=function(show,id){if(!show)editingPendingId=null;return _tme(show,id);};
+
+function renderPendingTab(){
+ (window.__tu||[]).forEach(function(u){URL.revokeObjectURL(u);});window.__tu=[];
+ var list=document.getElementById('pendingList'),empty=document.getElementById('pendingEmpty');
+ if(!pendingItems.length){list.innerHTML='';empty.classList.remove('hidden');return;}
+ empty.classList.add('hidden');
+ var labels={title:'Título',artist:'Artista',album:'Álbum',year:'Ano',genre:'Gênero',track:'Faixa'};
+ var src={itunes:'iTunes',deezer:'Deezer',background:'busca automática',batch:'busca em lote'};
+ list.innerHTML=[].concat(pendingItems).sort(function(a,b){return b.createdAt-a.createdAt;}).map(function(item){
+  var song=songs.find(function(s){return s.id===item.songId;});
+  var title=song?(song.title||song.name||'Sem título'):'(música removida)';
+  var tc=item.type==='both'?'both':item.type==='cover'?'cover':'metadata';
+  var tl=item.type==='both'?'Capa + Metadados':item.type==='cover'?'Capa':'Metadados';
+  var thumb='<div class="thumb-fallback">♪</div>';
+  if((item.type==='cover'||item.type==='both')&&item.coverBlob instanceof Blob){
+   var u=URL.createObjectURL(item.coverBlob);window.__tu.push(u);
+   thumb='<img class="thumb" src="'+u+'" alt="" onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'thumb-fallback\',textContent:\'♪\'}))">';
+  }
+  var d='';
+  if(item.type==='cover'||item.type==='both'){
+   var sl=src[String(item.source||'').toLowerCase()]||'';
+   if(item.coverArtist||item.coverAlbum)d+='<div class="text-xs text-zinc-400 mt-1">Imagem: <span class="text-green-400">'+escapeHtml(item.coverArtist||'—')+' — '+escapeHtml(item.coverAlbum||'—')+'</span>'+(sl?' <span class="text-zinc-500">(via '+sl+')</span>':'')+'</div>';
+   else if(item.source==='manual')d+='<div class="text-xs text-zinc-500 italic mt-1">Imagem adicionada manualmente</div>';
+   d+='<div class="text-xs text-zinc-400">Atual: <span class="text-zinc-300">'+escapeHtml(item.oldArtist||'—')+' — '+escapeHtml(item.oldAlbum||'—')+'</span></div>';
+  }
+  if(item.type==='metadata'||item.type==='both'){
+   d+=Object.keys(labels).filter(function(f){return ((item.oldValues&&item.oldValues[f])||'')!==((item.newValues&&item.newValues[f])||'');}).map(function(f){
+    return '<div class="text-xs text-zinc-400">'+labels[f]+': <span class="text-red-400">'+escapeHtml((item.oldValues&&item.oldValues[f])||'—')+'</span> ➜ <span class="text-green-400">'+escapeHtml((item.newValues&&item.newValues[f])||'—')+'</span></div>';}).join('');
+  }
+  return '<div class="pending-card" data-pid="'+item.id+'">'+thumb+
+   '<div class="pc-body"><span class="pend-tag '+tc+'">'+tl+'</span><div class="text-sm font-semibold text-white mt-1 break-words">'+escapeHtml(title)+'</div>'+d+'</div>'+
+   '<div class="pc-actions"><button onclick="editPending(\''+item.id+'\')" class="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold">Editar</button>'+
+   '<button onclick="substitutePending(\''+item.id+'\')" class="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold">Substituir arquivo local</button></div></div>';
+ }).join('');
+}
+
+async function substitutePending(pid){
+ var item=pendingItems.find(function(p){return p.id===pid;});if(!item)return;
+ var song=songs.find(function(s){return s.id===item.songId;});
+ if(!song){alert('Música não encontrada.');return;}
+ var isMp3=function(s){return /\.mp3$/i.test((s.file&&s.file.name)||s.id||'');};
+ var hasCover=item.type!=='metadata'&&item.coverBlob instanceof Blob;
+ var group=[song];
+ if(hasCover){var key=item.groupKey||groupKeyOf(song.artist,song.album);
+  group=songs.filter(function(s){return groupKeyOf(s.artist,s.album)===key;});
+  if(!group.some(function(s){return s.id===song.id;}))group.push(song);}
+ group=group.filter(isMp3);
+ if(!group.length){alert('A substituição aceita apenas arquivos MP3.');return;}
+ var n=group.length;
+ if(!confirm(n>1?'Há '+(n-1)+' outra(s) música(s) deste álbum. A capa será gravada em TODAS (os dados de cada uma são mantidos). Continuar?':'Substituir o arquivo local de "'+(song.title||song.name)+'"?'))return;
+ try{
+  for(var i=0;i<group.length;i++){
+   var s=group[i];
+   var cover=hasCover?item.coverBlob:(s.picture instanceof Blob?s.picture:null);
+   var blob=await buildTaggedMp3FromSong(s,cover,null);
+   var f=new File([blob],(s.file&&s.file.name)||(s.name+'.mp3'),{type:'audio/mpeg'});
+   if(s.url)URL.revokeObjectURL(s.url);
+   s.file=f;s.url=URL.createObjectURL(f);
+   if(hasCover){releaseCoverUrl(s);s.picture=item.coverBlob;}
+   await saveToDB(s);
+  }
+  var ids=new Set(group.map(function(g){return g.id;}));
+  var del=pendingItems.filter(function(p){return p.id===pid||ids.has(p.songId);});
+  for(var j=0;j<del.length;j++)await deletePendingItem(del[j].id);
+  if(currentSongId&&ids.has(currentSongId)){var cur=songs.find(function(s){return s.id===currentSongId;});
+   updateCover(cur);currentSongTitle.innerText=cur.title||cur.name||'Sem título';
+   currentSongMeta.innerText=(cur.artist||'Desconhecido')+(cur.album&&cur.album!=='Desconhecido'?' • '+cur.album:'');}
+  renderSongs();await refreshPending();alert('Arquivo(s) substituído(s) com sucesso.');
+ }catch(err){console.error(err);alert('Falha ao substituir: '+err.message);}
+}
+
+async function selectCoverFromUrl(url,artist,album){
+ try{
+  var blob;
+  try{var r=await fetch(url,{mode:'cors'});if(!r.ok)throw new Error('http');blob=await optimizeImage(await r.blob(),500);}
+  catch(e){blob=await new Promise(function(res,rej){var i=new Image();i.crossOrigin='Anonymous';i.onload=function(){optimizeImage(i,500).then(res,rej);};i.onerror=function(){rej(new Error('img'));};i.src=url;});}
+  editorCoverBlob=blob;editorCoverMeta={artist:artist||null,album:album||null};updateEditorCoverPreview();
+  document.getElementById('coverSearchModal').classList.remove('show');
+  document.getElementById('editorSearchStatus').textContent='Nova capa selecionada ('+(artist||'—')+' — '+(album||'—')+'). Clique em "Salvar imagem editada" para confirmar.';
+ }catch(e){alert('Não foi possível carregar esta imagem. Tente outra.');}
+}
+
+updateTabStyles();renderPlaylists();
 </script>
 </body>
 </html>
