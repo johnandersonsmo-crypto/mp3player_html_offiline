@@ -1,132 +1,71 @@
-# MP3 Player HTML Offline
+🎵 Player MP3 Web
 
-Player de MP3 moderno e funcional que roda diretamente no navegador, sem necessidade de servidor ou internet.
+Player de músicas que roda no navegador (celular ou computador). Suas músicas ficam salvas no próprio aparelho, e você pode editar capas e metadados e gravar as mudanças de volta nos arquivos MP3.
 
-## ✨ Funcionalidades
-
-### Reprodução
-- Play/Pause/Stop
-- Próxima/Anterior música
-- Controle de volume
-- Barra de progresso interativa
-- Modo Shuffle (aleatório)
-- Modo Loop (repetir)
-- Visualização do tempo decorrido e total
-
-### Gerenciamento de Músicas
-- Importação de arquivos MP3 e outros formatos de áudio
-- Criação e gerenciamento de playlists
-- Sistema de favoritos
-- Biblioteca completa com todas as músicas importadas
-- Persistência local das playlists e favoritos
-
-### Metadados ID3 🆕
-- Leitura automática de tags ID3 de arquivos MP3
-- Exibição de: Título, Artista e Álbum
-- Fallback para "Desconhecido" quando metadados não estão presentes
-- Uso do nome do arquivo como título alternativo
-
-### Busca Avançada 🆕
-- Pesquisa por nome do arquivo
-- Pesquisa por título (tag ID3)
-- Pesquisa por artista (tag ID3)
-- Pesquisa por álbum (tag ID3)
-- Busca em tempo real enquanto digita
-
-## 🚀 Como Usar
-
-1. Abra o arquivo `index.html` em qualquer navegador moderno
-2. Clique em "Selecionar Pasta" para importar seus arquivos de áudio
-3. Aguarde o processamento (com feedback visual do progresso)
-4. Use a barra de pesquisa para encontrar músicas por nome, artista, álbum ou título
-5. Clique em uma música para reproduzir
-6. Use os controles para gerenciar a reprodução
-7. **Novo:** Use o botão "🔄 Atualizar" para recarregar a pasta se adicionar novas músicas
-
-## 📋 Estrutura dos Dados
-
-Cada música importada possui a seguinte estrutura:
-
-```javascript
-{
-    id: "uuid-gerado-automaticamente",
-    name: "nome-do-arquivo.mp3",
-    title: "Título da Música (ID3)",
-    artist: "Nome do Artista (ID3)",
-    album: "Nome do Álbum (ID3)",
-    path: "caminho/completo/do/arquivo",
-    url: "blob:url-gerada-localmente"
-}
-```
-
-## 🔧 Tecnologias Utilizadas
-
-- HTML5 Audio API
-- JavaScript ES6+
-- jsmediatags (leitura de metadados ID3)
-- LocalStorage (persistência de dados)
-- CSS3 (layout responsivo)
-
-## 📝 Notas
-
-- Todas as operações são realizadas localmente no navegador
-- Nenhum dado é enviado para servidores externos
-- Compatível com Chrome, Firefox, Edge e Safari
-- Não requer instalação ou configuração adicional
-
-## 📝 Alterações Recentes
-
-### v1.5.0 - Cache de Biblioteca e Atualização Rápida
-- **💾 Sistema de Cache em Memória:** Implementado cache da biblioteca processada para evitar reprocessamento desnecessário.
-  - Após carregar uma pasta, os metadados ficam armazenados em memória durante a sessão.
-  - Ao recarregar a página (F5), a biblioteca é restaurada instantaneamente do cache (se ainda estiver na memória do navegador).
-  - Ideal para quem tem bibliotecas grandes e não quer esperar o reprocessamento a cada abertura.
-- **🔄 Botão "Atualizar Biblioteca":**
-  - Novo botão dedicado para forçar o recarregamento da pasta selecionada.
-  - Útil quando você adiciona novas músicas à pasta e quer atualizar a lista sem precisar selecionar a pasta novamente.
-  - Confirmação antes de recarregar para evitar cliques acidentais.
-- **📊 Status do Cache:**
-  - Indicador visual mostra quantas músicas estão em cache (ex: "✓ 500 músicas em cache").
-  - Feedback imediato sobre o estado da biblioteca carregada.
-- **⚡ Experiência do Usuário:**
-  - Navegação entre abas e pesquisas permanece instantânea.
-  - Redução significativa do tempo de espera em dispositivos móveis com muitas músicas.
-
-### v1.4.0 - Processamento em Lotes para Mobile
-- **🚀 Performance em Grandes Bibliotecas:** Implementado processamento assíncrono em lotes (batches) para carregamento de músicas.
-  - Arquivos são processados em grupos de 5, evitando travamentos em dispositivos com memória limitada.
-  - Adicionada pausa estratégica entre lotes para liberar a thread principal do navegador.
-  - **Solução definitiva** para o problema de carregamento em pastas grandes no Android (Samsung Galaxy A13 e similares).
-- **📊 Feedback Visual de Progresso:** 
-  - Modal informativo mostra o progresso do carregamento em tempo real (ex: "150/500").
-  - Interface elegante e não intrusiva durante o processo.
-- **⚡ Otimização Mobile:** Redução drástica do consumo de memória RAM durante importação de bibliotecas extensas.
-
-### v1.3.0 - Correção Android e Robustez
-- **🔧 Correção Crítica (Android/Samsung):** Resolvido problema onde arquivos não carregavam em dispositivos móveis (ex: Samsung Galaxy A13).
-  - Implementada validação baseada na **extensão do arquivo** (.mp3, .wav, etc.) em vez de depender exclusivamente do tipo MIME, que falha em alguns navegadores móveis.
-  - Adicionado suporte estendido para formatos `.wma` e `.opus`.
-- **🛡️ Leitura de ID3 Mais Segura:**
-  - Adicionado tratamento de erros (`try-catch`) na leitura de metadados para evitar travamentos silenciosos.
-  - Verificação de disponibilidade da biblioteca `jsmediatags` antes da execução.
-- **🐛 Melhoria no Debug:**
-  - Logs detalhados no console para facilitar diagnóstico de problemas de importação em diferentes dispositivos.
-- **💬 Feedback Visual:**
-  - Mensagem de erro mais clara quando nenhum arquivo de áudio válido é encontrado na pasta selecionada.
-
-### v1.2.0 - Busca Avançada por Metadados
-- **🔍 Pesquisa Ampliada:** A barra de pesquisa agora localiza músicas buscando não apenas pelo nome do arquivo, mas também pelos metadados ID3:
-  - Título da Música
-  - Nome do Artista
-  - Nome do Álbum
-- **⚡ Performance:** Otimização para busca instantânea em grandes bibliotecas sem impacto na performance.
-
-### v1.1.0 - Suporte a Metadados ID3
-- **🏷️ Leitura Automática de Tags:** O player agora lê automaticamente as tags ID3 (Título, Artista, Álbum) dos arquivos MP3 ao importar.
-- **✨ Exibição Formatada:** Mostra as informações da música atual formatadas como: `🎵 Título | 🎤 Artista | 💿 Álbum`.
-- **🔄 Fallback Inteligente:** Caso a tag não exista, exibe "Desconhecido" ou usa o nome do arquivo como título.
-- **🔒 Privacidade Total:** Toda a leitura é feita localmente no navegador, sem envio de dados para servidores.
-
-## 📄 Licença
+✨ Funcionalidades
+📚 Biblioteca
+📁 Importação de uma pasta inteira (MP3, WAV, OGG, FLAC e M4A)
+💾 Biblioteca salva no aparelho (IndexedDB), então as músicas continuam lá ao reabrir a página
+🏷️ Leitura automática das tags ID3: título, artista, álbum, ano, gênero, faixa e capa
+🔄 Quando não há tags, usa o nome do arquivo (formato Artista - Título)
+🎤 Lista de artistas com busca, recolhível no celular
+🔍 Pesquisa por título, artista ou álbum
+⚡ Lista com carregamento progressivo (200 músicas por vez) para bibliotecas grandes
+🗑️ Botão "Limpar Tudo" para remover músicas, favoritos, playlists e pendências
+▶️ Reprodução
+⏯️ Play/pause, anterior e próxima
+🔀 Aleatório (shuffle) e 🔁 repetir música (loop)
+📊 Barra de progresso e 🔊 controle de volume
+⌨️ Atalhos de teclado: Espaço (play/pause) e setas ← → (volta/avança 5 s)
+📱 Controles na tela de bloqueio e nas notificações do celular (Media Session)
+❤️ Favoritos e Playlists
+❤️ Favoritar pelo coração na lista ou no player
+📝 Playlists criadas por você, com a música adicionada pelo menu de 3 pontinhos
+📂 Menu Playlists com Favoritos (coração vermelho) e suas playlists, com a contagem de músicas e exclusão
+✅ A aba Playlists fica em destaque e mostra o nome da playlist aberta
+⋮ Menu da música (3 pontinhos)
+➕ Adicionar à playlist
+🆕 Criar playlist
+✏️ Editar metadados
+📤 Enviar documento: compartilha o MP3 (por exemplo, pelo WhatsApp) ou baixa o arquivo se o compartilhamento não for suportado
+🏷️ Editor de Metadados e Capas
+✏️ Edição de título, artista, álbum, ano, gênero e número da faixa
+🖼️ Capa: enviar imagem do aparelho, buscar na internet ou remover
+🌐 Preenchimento automático pela internet (MusicBrainz), que também busca a capa no Cover Art Archive, iTunes e Deezer
+🎯 Opção de pesquisar só pelo nome da banda
+📐 As imagens são redimensionadas e comprimidas automaticamente (máx. 500 px)
+🔔 Aba Pendentes
+🏷️ Toda alteração de capa ou metadados aparece aqui, com o selo Capa, Metadados ou Capa + Metadados
+👀 Mostra a miniatura, a origem da imagem e o antes → depois de cada campo
+✏️ Editar reabre a música no editor
+💽 Substituir arquivo local grava as tags ID3v2.4 e a capa dentro do MP3
+💿 A capa é aplicada a todas as músicas do mesmo artista e álbum. Os dados de cada música são mantidos
+🧹 Só as pendências aplicadas saem da lista
+🔎 Busca de Capas em Lote
+🖼️ Botão "Buscar capas faltantes" nas Pendentes
+🌐 Procura capas no iTunes e no Deezer para as músicas sem imagem, agrupadas por artista e álbum
+✅ Aceita apenas resultados em que artista e álbum conferem
+☑️ Você seleciona as capas desejadas e elas vão para a aba Pendentes
+🚀 Como Usar
+🌐 Abra a página no navegador
+📁 Toque em Carregar Pasta e escolha a pasta com suas músicas
+▶️ Toque em uma música para tocar
+⋮ Use o menu de 3 pontinhos para editar, adicionar a playlists ou compartilhar
+🔔 Revise as mudanças na aba Pendentes e toque em Substituir arquivo local para gravá-las no MP3
+📝 Observações
+🔒 As músicas ficam apenas no seu aparelho e nenhum arquivo é enviado para servidores
+🌐 A internet é usada só para carregar as bibliotecas da página (Tailwind, jsmediatags e fonte Inter) e para as buscas de metadados e capas (MusicBrainz, Cover Art Archive, iTunes e Deezer)
+🎧 Editar metadados e substituir arquivo funcionam apenas com arquivos .mp3
+💾 Favoritos e playlists ficam no localStorage, e a biblioteca e as pendências ficam no IndexedDB. Limpar os dados do site apaga tudo
+📥 Ao substituir o arquivo, a cópia salva no navegador é atualizada. O arquivo original na pasta do aparelho não é alterado, então compartilhe ou baixe o MP3 para obter a versão editada
+🔧 Tecnologias
+HTML5 Audio e Media Session API
+JavaScript puro
+Tailwind CSS (CDN)
+jsmediatags para leitura de ID3
+IndexedDB e localStorage
+Web Share API
+APIs de busca: MusicBrainz, Cover Art Archive, iTunes e Deezer
+📄 Licença
 
 Projeto livre para uso pessoal e educacional.
