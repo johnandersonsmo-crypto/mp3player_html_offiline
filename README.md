@@ -110,4 +110,4 @@ Toda alteração de capa ou metadados aparece na aba Pendentes.
 - Deezer API.
 
 ## 📄 Licença
-
+Projeto livre para uso pessoal e educacional.
