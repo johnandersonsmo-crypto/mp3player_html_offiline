@@ -2035,5 +2035,1222 @@ function saveLyPaste(){lySave(lyEl('lyText').value,'manual');}
  },true);
 })();
 </script>
+
+
+<script id='auto-meta-js'>
+/* patch v2 - capas em segundo plano, busca de metadados e Google Imagens */
+(function () {
+  var $ = function (i) { return document.getElementById(i); };
+  var clean = function (s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim(); };
+  var unk = function (v) { v = String(v || '').trim().toLowerCase(); return !v || v === 'desconhecido'; };
+  var sq = function (x) { return clean(x).replace(/ /g, ''); };
+  var sqa = function (x) { return clean(x).replace(/^the /, '').replace(/ /g, ''); };
+
+  /* Variantes de texto: "L.D.50." -> "L D 50" e "LD50"; "AC/DC" -> "AC DC" e "ACDC" */
+  var acSp = function (x) { return String(x || '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim(); };
+  var acJn = function (x) { return String(x || '').replace(/[^\p{L}\p{N}\s]+/gu, '').replace(/\s+/g, ' ').trim(); };
+  var acTerms = function (parts) {
+    var out = [], seen = {};
+    [function (x) { return String(x || '').trim(); }, acSp, acJn].forEach(function (f) {
+      var t = parts.map(f).filter(Boolean).join(' ');
+      if (t && !seen[t.toLowerCase()]) { seen[t.toLowerCase()] = 1; out.push(t); }
+    });
+    return out;
+  };
+
+  /* ---------- Rede com limite de tempo: nunca lança erro, nunca trava ---------- */
+  async function acJson(u) {
+    var c = new AbortController(), t = setTimeout(function () { c.abort(); }, 8000);
+    try { var r = await fetch(u, { signal: c.signal }); return r.ok ? await r.json() : false; }
+    catch (e) { return false; } finally { clearTimeout(t); }
+  }
+  async function acBlob(u) {
+    var c = new AbortController(), t = setTimeout(function () { c.abort(); }, 10000);
+    try { var r = await fetch(u, { mode: 'cors', signal: c.signal }); if (!r.ok) return null; return await optimizeImage(await r.blob(), 500); }
+    catch (e) { return null; } finally { clearTimeout(t); }
+  }
+
+  /* ---------- 1) CAPAS EM SEGUNDO PLANO (só capas; não mexe no áudio) ---------- */
+  var KEY = 'mp3_cover_tried2', tried = {}, busy = false, backoff = 0, fails = 0;
+  try { tried = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) {}
+  function saveTried() { try { localStorage.setItem(KEY, JSON.stringify(tried)); } catch (e) {} }
+  function acShow(t) {
+    var el = $('acStatus');
+    if (!el) { var h = $('pendingView') && $('pendingView').firstElementChild; if (!h) return; h.insertAdjacentHTML('afterend', '<div id="acStatus" class="text-[11px] text-zinc-500 mb-2"></div>'); el = $('acStatus'); }
+    el.textContent = t;
+  }
+
+  function candidates() {
+    var has = {}, seen = {}, out = [], i, s, k;
+    for (i = 0; i < songs.length; i++) if (songs[i].picture) has[groupKeyOf(songs[i].artist, songs[i].album)] = 1;
+    var cur = songs.find(function (x) { return x.id === currentSongId; });
+    var list = cur ? [cur].concat(songs) : songs;
+    for (i = 0; i < list.length; i++) {
+      s = list[i];
+      if (unk(s.artist) || unk(s.album)) continue;
+      k = groupKeyOf(s.artist, s.album);
+      if (has[k] || seen[k] || (tried[k] && Date.now() - tried[k] < 6048e5)) continue;
+      seen[k] = 1; out.push(s);
+    }
+    return out;
+  }
+
+  async function lookup(s) {
+    var ta = sqa(s.artist), tl = sq(s.album), terms = acTerms([s.artist, s.album]), net = 0, tries = 0, hit = null;
+    if (!ta || !tl) return { hit: null, net: false };
+    var ok = function (a, al) {
+      var xa = sqa(a), xl = sq(al);
+      return xa === ta && xl.indexOf(tl) >= 0;
+    };
+    for (var i = 0; i < terms.length && !hit; i++) {
+      var d = await acJson('https://itunes.apple.com/search?term=' + encodeURIComponent(terms[i]) + '&entity=album&limit=15');
+      tries++;
+      if (d === false) { net++; continue; }
+      var m = (d.results || []).find(function (x) { return x.artworkUrl100 && ok(x.artistName, x.collectionName); });
+      if (m) hit = { url: m.artworkUrl100.replace(/\d+x\d+bb\./, '600x600bb.'), artist: m.artistName, album: m.collectionName };
+    }
+    if (!hit) {
+      var d2 = await acJson('https://api.deezer.com/search/album?q=' + encodeURIComponent(terms[0]));
+      tries++;
+      if (d2 === false) net++;
+      else {
+        var m2 = (d2.data || []).find(function (x) { return x.cover_xl && ok(x.artist && x.artist.name, x.title); });
+        if (m2) hit = { url: m2.cover_xl, artist: m2.artist.name, album: m2.title };
+      }
+    }
+    return { hit: hit, net: net >= tries };
+  }
+
+  async function tick() {
+    if (busy || isImporting || !songs.length) return;
+    if (!navigator.onLine) { acShow('Capas automáticas: sem internet, aguardando a conexão.'); return; }
+    if (Date.now() < backoff) return;
+    busy = true;
+    try {
+      var q = candidates();
+      if (!q.length) { acShow('Capas automáticas: nenhum álbum na fila (só busca álbuns sem capa e com artista e álbum preenchidos).'); return; }
+      var s = q[0], label = s.artist + ' — ' + s.album;
+      acShow('Capas automáticas: buscando “' + label + '” (' + q.length + ' álbum(ns) na fila).');
+      var k = groupKeyOf(s.artist, s.album), r = await lookup(s);
+      if (r.net) {
+        backoff = Date.now() + Math.min(600000, 30000 * Math.pow(2, fails++));
+        acShow('Capas automáticas: serviço indisponível, tentando de novo em instantes.');
+        return;
+      }
+      fails = 0;
+      if (r.hit) {
+        var blob = await acBlob(r.hit.url);
+        var still = songs.find(function (x) { return x.id === s.id; });
+        if (blob && still && !still.picture) {
+          var st = playlistContainer.scrollTop;
+          await applyCoverPending(still, blob, {
+            source: 'background', oldArtist: s.artist, newArtist: s.artist, oldAlbum: s.album, newAlbum: s.album,
+            groupArtist: s.artist, groupAlbum: s.album, coverArtist: r.hit.artist, coverAlbum: r.hit.album
+          });
+          playlistContainer.scrollTop = st;
+          acShow('Capa aplicada: “' + label + '”.');
+        }
+      } else console.info('[capas] sem resultado para', label);
+      tried[k] = Date.now(); saveTried();
+    } catch (e) { console.warn('[capas]', e); } finally { busy = false; }
+  }
+  setInterval(tick, 5000);
+  audio.addEventListener('loadstart', function () { setTimeout(tick, 1500); });
+  window.addEventListener('online', function () { backoff = 0; fails = 0; setTimeout(tick, 1500); });
+
+  /* ---------- 2) BUSCA DE METADADOS MAIS CLARA (aceita pontos e barras: L.D.50., AC/DC) ---------- */
+  var sb = $('searchBoxContent');
+  sb.insertAdjacentHTML('afterbegin',
+    '<div id="msBox" class="space-y-2">' +
+    '<p class="text-xs text-zinc-400">Digite o que você souber (pelo menos um campo) e toque em “Buscar na internet”. Os campos já vêm preenchidos com os dados do arquivo.</p>' +
+    '<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">' +
+    '<label class="text-xs text-zinc-400 font-semibold">Nome da música<input id="msTitle" class="editor-field" type="text" placeholder="ex.: Hunting High and Low"></label>' +
+    '<label class="text-xs text-zinc-400 font-semibold">Artista ou banda<input id="msArtist" class="editor-field" type="text" placeholder="ex.: Stratovarius"></label>' +
+    '<label class="text-xs text-zinc-400 font-semibold">Álbum (opcional)<input id="msAlbum" class="editor-field" type="text" placeholder="ex.: Elements"></label>' +
+    '</div></div>');
+  $('editorSearchArtist').style.display = 'none';
+  var oldChk = $('editorSearchArtistOnly'); if (oldChk && oldChk.closest('label')) oldChk.closest('label').style.display = 'none';
+  ['msTitle', 'msArtist', 'msAlbum'].forEach(function (id) {
+    $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); searchMetadataOnline(); } });
+  });
+
+  var _ses = selectEditorSong;
+  selectEditorSong = function (id) {
+    _ses.apply(this, arguments);
+    var s = songs.find(function (x) { return x.id === id; }); if (!s) return;
+    var t = String(s.title || s.name || '').replace(/^\s*\d{1,3}\s*[-._)]\s*/, '').replace(/\s*[\(\[][^\)\]]*(official|video|lyric|audio|hd|hq)[^\)\]]*[\)\]]/ig, '').replace(/_/g, ' ').trim();
+    $('msTitle').value = t;
+    $('msArtist').value = unk(s.artist) ? '' : s.artist;
+    $('msAlbum').value = unk(s.album) ? '' : s.album;
+    if (sb.classList.contains('hidden')) toggleSearchBox();
+  };
+
+  var qc = function (v) { return String(v).replace(/["\\]/g, ' '); };
+  var fld = function (name, v) { var w = acSp(v).split(' ').filter(Boolean); return w.length ? name + ':(' + w.join(' AND ') + ')' : ''; };
+  var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  searchMetadataOnline = async function () {
+    var t = $('msTitle').value.trim(), a = $('msArtist').value.trim(), al = $('msAlbum').value.trim();
+    var st = $('editorSearchStatus'), box = $('editorMatches');
+    if (!t && !a && !al) { st.textContent = 'Preencha pelo menos um campo: música, artista ou álbum.'; return; }
+    if (!navigator.onLine) { st.textContent = 'Sem internet no momento.'; return; }
+    st.textContent = 'Buscando…'; box.classList.add('hidden');
+    var itu = await Promise.all(acTerms([t, a, al]).map(function (x) {
+      return acJson('https://itunes.apple.com/search?term=' + encodeURIComponent(x) + '&entity=song&limit=25');
+    }));
+    var mbQs = [
+      [t && 'recording:"' + qc(t) + '"', a && 'artist:"' + qc(a) + '"', al && 'release:"' + qc(al) + '"'],
+      [t && fld('recording', t), a && fld('artist', a), al && fld('release', al)],
+      [t && 'recording:"' + qc(acJn(t)) + '"', a && 'artist:"' + qc(acJn(a)) + '"', al && 'release:"' + qc(acJn(al)) + '"']
+    ];
+    var mb = false, mbSeen = {}, n = 0;
+    for (var qi = 0; qi < mbQs.length; qi++) {
+      if (mb && mb.recordings && mb.recordings.length) break;
+      var qs = mbQs[qi].filter(Boolean).join(' AND ');
+      if (!qs || mbSeen[qs]) continue;
+      mbSeen[qs] = 1;
+      if (n++) await wait(1100);
+      mb = await acJson('https://musicbrainz.org/ws/2/recording/?fmt=json&limit=15&query=' + encodeURIComponent(qs));
+    }
+    if (itu.every(function (x) { return x === false; }) && mb === false) { st.textContent = 'Não foi possível consultar agora (sem conexão ou serviço fora do ar).'; return; }
+    var res = [], seen = {};
+    var add = function (x) { var k = [x.title, x.artist, x.album].join('|').toLowerCase(); if (!seen[k]) { seen[k] = 1; res.push(x); } };
+    itu.forEach(function (d) {
+      ((d && d.results) || []).forEach(function (x) {
+        add({ title: x.trackName, artist: x.artistName, album: x.collectionName, year: String(x.releaseDate || '').slice(0, 4),
+          genre: x.primaryGenreName || '', track: x.trackNumber ? String(x.trackNumber) : '',
+          cover: x.artworkUrl100 ? x.artworkUrl100.replace(/\d+x\d+bb\./, '600x600bb.') : '', src: 'iTunes' });
+      });
+    });
+    ((mb && mb.recordings) || []).forEach(function (x) {
+      var rel = (x.releases || [])[0] || {};
+      add({ title: x.title, artist: (x['artist-credit'] || []).map(function (c) { return c.name || (c.artist && c.artist.name) || ''; }).filter(Boolean).join(', '),
+        album: rel.title || '', year: String(rel.date || '').slice(0, 4), genre: '', track: '', cover: '', mb: x, src: 'MusicBrainz' });
+    });
+    if (!res.length) { st.textContent = 'Nada encontrado. Tente só o artista, ou só a música, sem trechos como “feat.” ou “(ao vivo)”.'; return; }
+    window._msRes = res;
+    box.innerHTML = res.map(function (x, i) {
+      return '<button onclick="applyMetaResult(' + i + ')" class="w-full text-left p-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700">' +
+        '<span class="block text-sm font-semibold text-white">' + escapeHtml(x.title || 'Sem título') + '</span>' +
+        '<span class="block text-xs text-zinc-300 mt-1">' + escapeHtml([x.artist, x.album, x.year, x.src].filter(Boolean).join(' • ')) + '</span></button>';
+    }).join('');
+    box.classList.remove('hidden');
+    st.textContent = res.length + ' resultado(s). Toque no correto para preencher os campos:';
+  };
+
+  window.applyMetaResult = async function (i) {
+    var r = (window._msRes || [])[i]; if (!r) return;
+    var sid = editorSongId, st = $('editorSearchStatus');
+    var set = function (id, v) { var e = $(id); e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('editTitle', r.title || ''); set('editArtist', r.artist || ''); set('editAlbum', r.album || ''); set('editYear', r.year || '');
+    if (r.genre) set('editGenre', r.genre);
+    if (r.track) set('editTrack', r.track);
+    $('editorMatches').classList.add('hidden');
+    st.textContent = 'Dados preenchidos. Procurando a capa…';
+    var c = null;
+    if (r.cover) c = await acBlob(r.cover);
+    if (!c && r.mb) { try { c = await searchCoverInMusicBrainz(r.mb); } catch (e) {} }
+    if (!c) { try { c = await searchCoverInITunes(r.artist, r.album, r.title); } catch (e) {} }
+    if (!c) { try { c = await searchCoverInDeezer(r.artist, r.album, r.title); } catch (e) {} }
+    if (sid !== editorSongId) return;
+    if (c) {
+      editorCoverBlob = c; editorCoverMeta = { artist: r.artist || null, album: r.album || null };
+      updateEditorCoverPreview();
+      st.textContent = 'Dados e capa encontrados. Confira e salve.';
+    } else st.textContent = 'Dados preenchidos, mas sem capa compatível. Use “Google Imagens” ou “Alterar”.';
+  };
+
+  /* Busca de capa (botão “Buscar na Internet”) também aceita pontos e barras */
+  openCoverSearchModal = async function () {
+    var artist = $('editArtist').value.trim(), album = $('editAlbum').value.trim(), title = $('editTitle').value.trim();
+    if (!artist && !album) { alert('Preencha pelo menos o Artista ou o Álbum.'); return; }
+    var modal = $('coverSearchModal'), results = $('coverSearchResults'), status = $('coverSearchStatus');
+    modal.classList.add('show'); results.innerHTML = ''; status.textContent = 'Buscando capas…';
+    var terms = acTerms([artist, album || title]), images = [], seen = {};
+    var addImage = function (url, a, al) { if (url && !seen[url]) { seen[url] = 1; images.push({ url: url, artist: a || '', album: al || '' }); } };
+    for (var i = 0; i < terms.length; i++) {
+      var d = await acJson('https://itunes.apple.com/search?term=' + encodeURIComponent(terms[i]) + '&entity=album&limit=15');
+      ((d && d.results) || []).forEach(function (x) { if (x.artworkUrl100) addImage(x.artworkUrl100.replace(/\d+x\d+bb\./, '600x600bb.'), x.artistName, x.collectionName); });
+      if (images.length >= 6) break;
+    }
+    var dz = await acJson('https://api.deezer.com/search/album?q=' + encodeURIComponent(terms[0]));
+    ((dz && dz.data) || []).forEach(function (x) { if (x.cover_xl) addImage(x.cover_xl, x.artist && x.artist.name, x.title); });
+    if (!images.length) { status.textContent = 'Nenhuma capa encontrada. Tente o Google Imagens.'; return; }
+    status.textContent = images.length + ' capas encontradas. Confira o artista e o álbum abaixo de cada imagem e toque para selecionar:';
+    results.innerHTML = images.map(function (img) {
+      return '<div class="cursor-pointer rounded-lg overflow-hidden border-2 border-transparent hover:border-green-500 transition-all bg-zinc-800" data-url="' + escapeAttr(img.url) + '" data-artist="' + escapeAttr(img.artist) + '" data-album="' + escapeAttr(img.album) + '" onclick="selectCoverFromUrl(this.dataset.url,this.dataset.artist,this.dataset.album)">' +
+        '<img src="' + escapeAttr(img.url) + '" class="w-full aspect-square object-cover" loading="lazy" onerror="this.parentElement.style.display=\'none\'">' +
+        '<div class="px-1.5 py-1 text-[10px] text-zinc-400 truncate">' + escapeHtml(img.artist || '—') + ' — ' + escapeHtml(img.album || '—') + '</div></div>';
+    }).join('');
+  };
+
+  /* ---------- 3) GOOGLE IMAGENS: abre a pesquisa pronta; você baixa e inclui pelo editor ---------- */
+  var anchor = document.querySelector('#editorForm button[onclick="openCoverSearchModal()"]');
+  if (anchor) {
+    var g = document.createElement('button');
+    g.className = 'px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-semibold transition-colors';
+    g.textContent = 'Google Imagens';
+    g.onclick = function () {
+      var q = [$('editArtist').value, $('editAlbum').value || $('editTitle').value, 'capa álbum'].filter(Boolean).join(' ');
+      window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q), '_blank', 'noopener');
+      $('editorSearchStatus').textContent = 'Baixe a imagem e use “Alterar”, ou copie a imagem e cole aqui com Ctrl+V.';
+    };
+    anchor.after(g);
+  }
+
+  /* Colar imagem (Ctrl+V) direto no editor */
+  document.addEventListener('paste', async function (e) {
+    if ($('metadataEditorView').classList.contains('hidden') || !editorSongId) return;
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image/') !== 0) continue;
+      var f = items[i].getAsFile(); if (!f) continue;
+      e.preventDefault();
+      try {
+        editorCoverBlob = await optimizeImage(f, 500); editorCoverMeta = { artist: null, album: null };
+        updateEditorCoverPreview();
+        $('editorSearchStatus').textContent = 'Imagem colada. Confira a prévia e clique em “Salvar imagem editada”.';
+      } catch (err) { $('editorSearchStatus').textContent = 'Não foi possível usar a imagem colada.'; }
+      return;
+    }
+  });
+})();
+
+</script>
+<!-- PATCH v3 — cole este bloco inteiro no FIM do arquivo, logo antes de </body> (depois dos outros <script>) -->
+<script id="patch-v3">
+/* 1) SUBSTITUIR ARQUIVO LOCAL: capa vai para todo o álbum; metadados só para a música da pendência */
+async function substitutePending(pid){
+ var item=pendingItems.find(function(p){return p.id===pid;});if(!item)return;
+ var song=songs.find(function(s){return s.id===item.songId;});
+ if(!song){alert('Música não encontrada.');return;}
+ var isMp3=function(s){return /\.mp3$/i.test((s.file&&s.file.name)||s.id||'');};
+ var hasCover=item.type!=='metadata'&&item.coverBlob instanceof Blob;
+ var hasMeta=(item.type==='metadata'||item.type==='both')&&item.newValues;
+ var group=[song];
+ if(hasCover){
+  var keys=new Set([groupKeyOf(song.artist,song.album)]);
+  if(item.groupKey)keys.add(item.groupKey);
+  if(item.oldArtist||item.oldAlbum)keys.add(groupKeyOf(item.oldArtist,item.oldAlbum));
+  group=songs.filter(function(s){return keys.has(groupKeyOf(s.artist,s.album));});
+  if(!group.some(function(s){return s.id===song.id;}))group.push(song);
+ }
+ group=group.filter(isMp3);
+ if(!group.some(function(s){return s.id===song.id;})){alert('A substituição aceita apenas arquivos MP3.');return;}
+ var n=group.length;
+ var msg=n>1?'A capa será gravada em '+n+' músicas deste álbum. Título, artista e demais dados de cada uma NÃO serão alterados (só a música "'+(song.title||song.name)+'" recebe os metadados editados). Continuar?'
+            :'Substituir o arquivo local de "'+(song.title||song.name)+'"?';
+ if(!confirm(msg))return;
+ try{
+  for(var i=0;i<group.length;i++){
+   var s=group[i],isOwn=s.id===song.id;
+   var cover=hasCover?item.coverBlob:(s.picture instanceof Blob?s.picture:null);
+   var vals=(isOwn&&hasMeta)?item.newValues:null;
+   var blob=await buildTaggedMp3FromSong(s,cover,vals);
+   var f=new File([blob],(s.file&&s.file.name)||(s.name+'.mp3'),{type:'audio/mpeg'});
+   if(s.url)URL.revokeObjectURL(s.url);
+   s.file=f;s.url=URL.createObjectURL(f);
+   if(hasCover){releaseCoverUrl(s);s.picture=item.coverBlob;}
+   if(vals){s.title=vals.title||s.title;s.artist=vals.artist||s.artist;s.album=vals.album||s.album;s.year=vals.year||s.year;s.genre=vals.genre||s.genre;s.track=vals.track||s.track;}
+   await saveToDB(s);
+  }
+  var ids=new Set(group.map(function(g){return g.id;}));
+  var del=pendingItems.filter(function(p){
+   if(p.id===pid||p.songId===song.id)return true;
+   return hasCover&&p.type==='cover'&&ids.has(p.songId);
+  });
+  for(var j=0;j<del.length;j++)await deletePendingItem(del[j].id);
+  if(currentSongId&&ids.has(currentSongId)){
+   var cur=songs.find(function(s){return s.id===currentSongId;});
+   updateCover(cur);currentSongTitle.innerText=cur.title||cur.name||'Sem título';
+   currentSongMeta.innerText=(cur.artist||'Desconhecido')+(cur.album&&cur.album!=='Desconhecido'?' • '+cur.album:'');
+  }
+  updateArtists();renderSongs();await refreshPending();
+  alert('Arquivo(s) substituído(s) com sucesso.');
+ }catch(err){console.error(err);alert('Falha ao substituir: '+err.message);}
+}
+
+/* 2) GOOGLE IMAGENS em nova aba, busca pronta */
+function openGoogleImages(){
+ var a=document.getElementById('editArtist').value.trim();
+ var al=document.getElementById('editAlbum').value.trim()||document.getElementById('editTitle').value.trim();
+ var q=[a,al,'capa álbum'].filter(Boolean).join(' ');
+ window.open('https://www.google.com/search?tbm=isch&q='+encodeURIComponent(q),'_blank');
+}
+
+/* 3) BOTÕES DA CAPA reorganizados (celular) */
+(function(){
+ var ft=document.getElementById('editorFileType');if(!ft)return;
+ var box=ft.nextElementSibling;if(!box)return;
+ var fileInput=document.getElementById('editCoverFile');
+ var ico=function(p){return '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="'+p+'"/></svg>';};
+ var g='<svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>';
+ var base='px-3 py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ';
+ box.className='grid grid-cols-2 gap-2 mt-3 w-full';
+ box.innerHTML=
+  '<button onclick="openGoogleImages()" class="col-span-2 '+base+'bg-white hover:bg-zinc-200 text-zinc-800 text-sm">'+g+'Pesquisar no Google Imagens</button>'+
+  '<button onclick="openCoverSearchModal()" class="'+base+'bg-green-600 hover:bg-green-500 text-white">'+ico('M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z')+'Buscar capa</button>'+
+  '<button onclick="document.getElementById(\'editCoverFile\').click()" class="'+base+'bg-zinc-700 hover:bg-zinc-600 text-white">'+ico('M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12')+'Da galeria</button>'+
+  '<button onclick="clearEditorCover()" class="'+base+'bg-zinc-800 hover:bg-zinc-700 text-red-400 border border-zinc-700">'+ico('M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16')+'Remover</button>'+
+  '<button id="btnSaveEditedCover" onclick="saveEditedCover()" class="'+base+'bg-green-600 hover:bg-green-500 text-white">'+ico('M5 13l4 4L19 7')+'<span>Salvar capa</span></button>';
+ if(fileInput)box.appendChild(fileInput);
+ if(typeof updateEditorSaveButtons==='function')updateEditorSaveButtons();
+})();
+/* texto do botão salvar acompanha o novo rótulo */
+var _uesb=updateEditorSaveButtons;
+updateEditorSaveButtons=function(){
+ _uesb();
+ var b=document.getElementById('btnSaveEditedCover'),s=b&&b.querySelector('span');
+ if(s&&s.textContent==='Salvar imagem editada')s.textContent='Salvar capa';
+};
+</script>
+
+<script id="patch-v4">
+/* ===== 1) Google Imagens como última opção na janela de busca de capas ===== */
+function openGoogleImages(){
+ var v=function(i){var e=document.getElementById(i);return e?e.value.trim():'';};
+ var q=[v('editArtist'),v('editAlbum')||v('editTitle'),'capa álbum'].filter(Boolean).join(' ');
+ window.open('https://www.google.com/search?tbm=isch&q='+encodeURIComponent(q),'_blank');
+}
+(function(){
+ var m=document.querySelector('#coverSearchModal .modal-content');if(!m)return;
+ var f=m.lastElementChild;if(!f)return;
+ f.className='flex justify-between items-center gap-2 mt-6';
+ var g='<svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>';
+ var b=document.createElement('button');
+ b.className='px-3 py-2 rounded-lg bg-white hover:bg-zinc-200 text-zinc-800 text-xs font-semibold flex items-center gap-2';
+ b.innerHTML=g+'Não achou? Google Imagens';b.onclick=openGoogleImages;
+ f.insertBefore(b,f.firstChild);
+})();
+
+/* ===== 2) Letras: somente automáticas ===== */
+(function(){
+ var v=document.getElementById('lyricsView');if(!v)return;
+ var p=document.getElementById('lyPaste');if(p)p.remove();
+ var last=v.lastElementChild;
+ if(last&&last.querySelector&&last.querySelector('#lyFile'))last.remove();
+})();
+var _lyR=lyRender;
+lyRender=function(){
+ _lyR();
+ var e=document.querySelector('#lyBody .ly-empty');
+ if(e&&/não encontrada/i.test(e.textContent))e.textContent='Letra não encontrada automaticamente para esta música.';
+};
+
+/* ===== 3) Tour guiado (só com biblioteca vazia) ===== */
+(function(){
+ var st=document.createElement('style');
+ st.textContent='#tourShade{position:fixed;inset:0;z-index:9999;touch-action:none}#tourSpot{position:fixed;z-index:10000;border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,.75);border:2px solid #22c55e;pointer-events:none}#tourCard{position:fixed;z-index:10001;background:#18181b;border:1px solid #3f3f46;border-radius:14px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.6)}';
+ document.head.appendChild(st);
+})();
+var tourIdx=0,tourEl=null,tourSnap=null;
+var TOUR=[
+ {t:'Tour rápido 👋',x:'Veja em 1 minuto o que o player faz. Suas músicas ficam só no seu aparelho.'},
+ {t:'Carregar Pasta',x:'Escolha a pasta com seus MP3. Eles ficam salvos e tocam sem internet.',s:function(){var i=document.getElementById('fileInput');return i&&i.parentElement;}},
+ {t:'Controles',x:'Play, anterior/próxima, aleatório, repetir e volume. Coração: favoritar. Três pontinhos: playlist, editar, letra e WhatsApp.',s:function(){var b=document.getElementById('btnPlay');return b&&b.parentElement;}},
+ {t:'Artistas',x:'Filtre as músicas por artista.',s:function(){var s=document.getElementById('sidebar');return s&&s.firstElementChild;}},
+ {t:'Músicas',x:'Toda a biblioteca, com pesquisa por título, artista ou álbum.',s:function(){return document.getElementById('tab-all');}},
+ {t:'Playlists',x:'Seus Favoritos e as playlists que você criar.',s:function(){return document.getElementById('tab-playlists');}},
+ {t:'Limpar Tudo',x:'Apaga a biblioteca do player (não apaga os arquivos do aparelho). Este tour volta a abrir.',s:function(){return document.querySelector('button[onclick="clearLibrary()"]');}},
+ {v:'editor',t:'Editor de metadados',x:'Três pontinhos da música › "Editar metadados". Edite título, artista, álbum, ano, gênero e faixa.',s:function(){var e=document.getElementById('editTitle');return e&&e.closest('.grid');}},
+ {v:'editor',t:'Preencher automaticamente',x:'Busca título, artista, álbum e capa na internet.',s:function(){var e=document.getElementById('searchBoxContent');return e&&e.parentElement;}},
+ {v:'editor',t:'Capa',x:'Google Imagens (nova aba), buscar capa, escolher da galeria ou remover.',s:function(){var e=document.getElementById('editorFileType');return e&&e.nextElementSibling;}},
+ {v:'editor',t:'Salvar metadados',x:'Aplica no player na hora e envia a mudança para Pendentes.',s:function(){return document.getElementById('btnSaveEditedMetadata');}},
+ {v:'pending',t:'Pendentes',x:'Mudanças que ainda não foram gravadas no MP3. Já valem dentro do player.',s:function(){return document.getElementById('tourDemoCard');}},
+ {v:'pending',t:'Substituir arquivo local',x:'Grava no MP3. A capa vai para todo o álbum; os metadados só para esta música.',s:function(){return document.getElementById('tourDemoSub');}},
+ {v:'pending',t:'Buscar capas faltantes',x:'Procura de uma vez as capas de todas as músicas sem capa.',s:function(){return document.querySelector('#pendingView button[onclick="openBatchCoverModal()"]');}},
+ {v:'lyrics',t:'Letras automáticas',x:'Três pontinhos › "Ver letra". Busca sozinha (.lrc, MP3 ou internet). Se sincronizada, acompanha a música.',s:function(){return document.getElementById('lyBody');}},
+ {t:'Pronto! 🎶',x:'Toque em "Carregar Pasta" para começar.'}
+];
+function tourG(i){return document.getElementById(i);}
+function tourNoScroll(e){
+ if(e.target&&e.target.closest&&e.target.closest('#tourCard'))return;
+ if(e.type==='keydown'){if(e.key==='Escape'){tourEnd();return;}if([' ','ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].indexOf(e.key)<0)return;}
+ e.preventDefault();
+}
+function tourSnapshot(){
+ var ids=['editTitle','editArtist','editAlbum','editYear','editGenre','editTrack'];
+ tourSnap={lib:tourG('libraryView').className,pen:tourG('pendingView').className,edi:tourG('metadataEditorView').className,
+  ly:tourG('lyricsView').style.display,eEmpty:tourG('editorEmpty').className,eForm:tourG('editorForm').className,
+  eFile:tourG('editorFileName').textContent,eCover:tourG('editorCover').innerHTML,
+  vals:ids.map(function(i){return tourG(i).value;}),ids:ids,
+  pList:tourG('pendingList').innerHTML,pEmpty:tourG('pendingEmpty').className,
+  lyB:tourG('lyBody').innerHTML,lyT:tourG('lyTitle').textContent,lyM:tourG('lyMeta').textContent,lyS:tourG('lySrc').textContent};
+}
+function tourRestore(){
+ var s=tourSnap;if(!s)return;
+ tourG('libraryView').className=s.lib;tourG('pendingView').className=s.pen;tourG('metadataEditorView').className=s.edi;
+ tourG('lyricsView').style.display=s.ly;tourG('editorEmpty').className=s.eEmpty;tourG('editorForm').className=s.eForm;
+ tourG('editorFileName').textContent=s.eFile;tourG('editorCover').innerHTML=s.eCover;
+ s.ids.forEach(function(i,k){tourG(i).value=s.vals[k];});
+ tourG('pendingList').innerHTML=s.pList;tourG('pendingEmpty').className=s.pEmpty;
+ tourG('lyBody').innerHTML=s.lyB;tourG('lyTitle').textContent=s.lyT;tourG('lyMeta').textContent=s.lyM;tourG('lySrc').textContent=s.lyS;
+ tourSnap=null;
+}
+function tourView(v){
+ v=v||'main';
+ tourG('libraryView').classList.toggle('hidden',v!=='main');
+ tourG('pendingView').classList.toggle('hidden',v!=='pending');
+ var ed=tourG('metadataEditorView');ed.classList.toggle('hidden',v!=='editor');ed.classList.toggle('flex',v==='editor');
+ tourG('lyricsView').style.display=v==='lyrics'?'flex':'none';
+ if(v==='editor'){
+  tourG('editorEmpty').classList.add('hidden');tourG('editorForm').classList.remove('hidden');
+  tourG('editorFileName').textContent='01 - Exemplo.mp3';tourG('editorCover').textContent='♪';
+  var d={editTitle:'Nome da música',editArtist:'Artista',editAlbum:'Álbum',editYear:'2024',editGenre:'Rock',editTrack:'1'};
+  for(var k in d)tourG(k).value=d[k];
+ }
+ if(v==='pending'){
+  tourG('pendingEmpty').classList.add('hidden');
+  tourG('pendingList').innerHTML='<div id="tourDemoCard" class="pending-card"><div class="thumb-fallback">♪</div><div class="pc-body"><span class="pend-tag both">Capa + Metadados</span><div class="text-sm font-semibold text-white mt-1">Nome da música</div><div class="text-xs text-zinc-400 mt-1">Título: <span class="text-red-400">Faixa 01</span> ➜ <span class="text-green-400">Nome da música</span></div></div><div class="pc-actions"><button class="px-3 py-2 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-semibold">Editar</button><button id="tourDemoSub" class="px-3 py-2 rounded-lg bg-green-600 text-white text-xs font-semibold">Substituir arquivo local</button></div></div>';
+ }
+ if(v==='lyrics'){
+  tourG('lyTitle').textContent='Nome da música';tourG('lyMeta').textContent='Artista • Álbum';tourG('lySrc').textContent='Letra da internet • sincronizada';
+  tourG('lyBody').innerHTML='<div class="ly-line">Primeira linha da letra</div><div class="ly-line on">Linha atual em destaque</div><div class="ly-line">Próxima linha</div><div class="ly-line">Outra linha</div>';
+ }
+}
+function tourEnd(){
+ ['wheel','touchmove','keydown'].forEach(function(t){document.removeEventListener(t,tourNoScroll,true);});
+ window.removeEventListener('resize',tourPlace);
+ document.documentElement.style.overflow='';document.body.style.overflow='';
+ ['tourShade','tourSpot','tourCard'].forEach(function(i){var e=tourG(i);if(e)e.remove();});
+ tourRestore();window.scrollTo(0,0);
+}
+function tourPlace(){
+ var sp=tourG('tourSpot'),cd=tourG('tourCard'),sh=tourG('tourShade');if(!sp)return;
+ var W=window.innerWidth,H=window.innerHeight,cw=Math.min(420,W-24);
+ cd.style.width=cw+'px';var ch=cd.offsetHeight;
+ var r=tourEl&&tourEl.getBoundingClientRect();
+ if(!r||!r.width||!r.height){
+  sp.style.display='none';sh.style.background='rgba(0,0,0,.75)';
+  cd.style.left=((W-cw)/2)+'px';cd.style.top=Math.max(12,(H-ch)/2)+'px';return;
+ }
+ sp.style.display='block';sh.style.background='transparent';
+ sp.style.left=(r.left-6)+'px';sp.style.top=(r.top-6)+'px';sp.style.width=(r.width+12)+'px';sp.style.height=(r.height+12)+'px';
+ var gap=14,cl=Math.max(12,Math.min(W-cw-12,r.left+r.width/2-cw/2)),L,T;
+ if(r.bottom+6+gap+ch<=H-8){L=cl;T=r.bottom+6+gap;}
+ else if(r.top-6-gap-ch>=8){L=cl;T=r.top-6-gap-ch;}
+ else if(r.right+6+gap+cw<=W-8){L=r.right+6+gap;T=Math.max(8,Math.min(H-ch-8,r.top));}
+ else if(r.left-6-gap-cw>=8){L=r.left-6-gap-cw;T=Math.max(8,Math.min(H-ch-8,r.top));}
+ else{L=cl;T=(H-r.bottom>r.top)?H-ch-8:8;}
+ cd.style.left=L+'px';cd.style.top=T+'px';
+}
+function tourShow(){
+ var s=TOUR[tourIdx],last=tourIdx===TOUR.length-1;
+ tourView(s.v);
+ tourG('tourCard').innerHTML=
+  '<div class="text-xs text-green-400 font-semibold mb-1">'+(tourIdx+1)+' / '+TOUR.length+'</div>'+
+  '<div class="text-white font-bold mb-1">'+s.t+'</div>'+
+  '<div class="text-zinc-300 text-sm leading-snug mb-3">'+s.x+'</div>'+
+  '<div class="flex items-center gap-2"><button onclick="tourEnd()" class="px-2 py-2 text-xs font-semibold text-zinc-400">Pular</button><span class="flex-1"></span>'+
+  (tourIdx>0?'<button onclick="tourGo(-1)" class="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-200 text-sm font-semibold">Voltar</button>':'')+
+  '<button onclick="'+(last?'tourEnd()':'tourGo(1)')+'" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm font-semibold">'+(last?'Concluir':'Próximo')+'</button></div>';
+ tourEl=s.s?s.s():null;
+ if(tourEl&&!tourEl.getBoundingClientRect().width)tourEl=null;
+ if(tourEl){tourEl.scrollIntoView({block:'start',behavior:'auto'});window.scrollBy(0,-16);}
+ else window.scrollTo(0,0);
+ tourPlace();setTimeout(tourPlace,120);
+}
+function tourGo(d){tourIdx=Math.max(0,Math.min(TOUR.length-1,tourIdx+d));tourShow();}
+function startTour(){
+ if(tourG('tourCard'))return;
+ tourSnapshot();
+ ['tourShade','tourSpot','tourCard'].forEach(function(id){var d=document.createElement('div');d.id=id;document.body.appendChild(d);});
+ document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';
+ ['wheel','touchmove','keydown'].forEach(function(t){document.addEventListener(t,tourNoScroll,{capture:true,passive:false});});
+ window.addEventListener('resize',tourPlace);
+ tourIdx=0;tourShow();
+}
+/* abre o tour só se o banco realmente estiver vazio */
+(function w(n){
+ n=n||0;
+ if(typeof db==='undefined'||!db){if(n<100)setTimeout(function(){w(n+1);},200);return;}
+ try{
+  var c=db.transaction([STORE_NAME],'readonly').objectStore(STORE_NAME).count();
+  c.onsuccess=function(){if(c.result===0)setTimeout(function(){if(!songs.length&&!isImporting)startTour();},700);};
+ }catch(e){}
+})();
+/* após "Limpar Tudo" confirmado, abre o tour */
+var _clr=clearLibrary;
+clearLibrary=async function(){
+ var had=songs.length>0;
+ await _clr.apply(this,arguments);
+ if(!had)return;
+ var k=0,t=setInterval(function(){k++;if(songs.length===0){clearInterval(t);setTimeout(function(){if(!songs.length)startTour();},500);}else if(k>25)clearInterval(t);},150);
+};
+</script>
+
+<script id="patch-v6">
+/* ===== A) Botão do Google lá embaixo (última opção) no editor ===== */
+(function(){
+ var ft=document.getElementById('editorFileType');var box=ft&&ft.nextElementSibling;if(!box)return;
+ var gb=box.querySelector('button[onclick="openGoogleImages()"]');if(!gb)return;
+ gb.className=gb.className.replace('text-sm','text-xs');
+ if(gb.lastChild&&gb.lastChild.nodeType===3)gb.lastChild.textContent='Última opção: Google Imagens';
+ box.appendChild(gb);
+ var fi=document.getElementById('editCoverFile');if(fi)box.appendChild(fi);
+})();
+
+/* ===== B) Tour: passos de busca de capa (janela de capas, Google, lote) ===== */
+if(typeof TOUR!=='undefined'){
+ (function(){
+  var f=function(t){for(var i=0;i<TOUR.length;i++)if(TOUR[i].t===t)return i;return -1;};
+  var i=f('Capa');
+  if(i>=0){
+   TOUR[i].x='Quatro opções: Buscar capa (internet), Da galeria, Remover e, por último, Google Imagens.';
+   TOUR.splice(i+1,0,
+    {v:'cover',t:'Buscar capa',x:'Lista capas do iTunes e Deezer com artista e álbum de cada uma. Toque na certa para usar.',s:function(){return document.getElementById('coverSearchResults');}},
+    {v:'cover',t:'Google Imagens (última opção)',x:'Se nenhuma serve, abre a busca do Google em nova aba. Baixe a imagem e use "Da galeria".',s:function(){var m=document.querySelector('#coverSearchModal .modal-content');return m&&m.lastElementChild;}});
+  }
+  var p=f('Pendentes');if(p>=0)TOUR[p].x='Mudanças ainda não gravadas no MP3. Já valem no player. Capas achadas em segundo plano também chegam aqui.';
+  var s=f('Substituir arquivo local');if(s>=0)TOUR[s].x='Cria o MP3 novo com a capa e os metadados. No PC grava direto na pasta; no celular baixa o arquivo para você trocar o original. Capa: todo o álbum. Metadados: só esta música.';
+  var b=f('Buscar capas faltantes');
+  if(b>=0)TOUR.splice(b+1,0,{v:'batch',t:'Busca de capas em lote',x:'Procura as capas de todas as músicas sem capa e envia as escolhidas para Pendentes.',s:function(){return document.querySelector('#batchCoverModal button[onclick="startBatchSearch()"]');}});
+ })();
+ var _tv6=tourView;
+ tourView=function(v){
+  var cm=tourG('coverSearchModal'),bm=tourG('batchCoverModal');
+  cm.classList.remove('show');bm.classList.remove('show');
+  if((v==='cover'||v==='batch')&&tourSnap&&!tourSnap.cs)tourSnap.cs={st:tourG('coverSearchStatus').innerHTML,res:tourG('coverSearchResults').innerHTML};
+  _tv6(v==='cover'?'editor':v==='batch'?'pending':v);
+  if(v==='cover'){
+   tourG('coverSearchStatus').textContent='Exemplo: 3 capas encontradas. Confira e toque na certa:';
+   var h='';for(var k=0;k<3;k++)h+='<div class="rounded-lg overflow-hidden bg-zinc-800"><div class="w-full aspect-square flex items-center justify-center text-zinc-600 text-3xl">♪</div><div class="px-1.5 py-1 text-[10px] text-zinc-400 truncate">Artista — Álbum</div></div>';
+   tourG('coverSearchResults').innerHTML=h;cm.classList.add('show');
+  }
+  if(v==='batch')bm.classList.add('show');
+ };
+ var _te6=tourEnd;
+ tourEnd=function(){
+  tourG('coverSearchModal').classList.remove('show');tourG('batchCoverModal').classList.remove('show');
+  if(tourSnap&&tourSnap.cs){tourG('coverSearchStatus').innerHTML=tourSnap.cs.st;tourG('coverSearchResults').innerHTML=tourSnap.cs.res;}
+  _te6();
+ };
+}
+
+/* ===== C) Substituir arquivo local: gera o MP3 novo e ENTREGA (grava na pasta ou baixa) ===== */
+function crc32(u8){
+ var t=crc32.t;if(!t){t=crc32.t=[];for(var n=0;n<256;n++){var c=n;for(var k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}}
+ var c2=0xFFFFFFFF;for(var i=0;i<u8.length;i++)c2=t[(c2^u8[i])&255]^(c2>>>8);return(c2^0xFFFFFFFF)>>>0;
+}
+async function buildZip(files){
+ var enc=new TextEncoder(),parts=[],cd=[],off=0;
+ for(var i=0;i<files.length;i++){
+  var data=new Uint8Array(await files[i].blob.arrayBuffer()),nm=enc.encode(files[i].name),crc=crc32(data);
+  var lh=new DataView(new ArrayBuffer(30));
+  lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(12,0x21,true);
+  lh.setUint32(14,crc,true);lh.setUint32(18,data.length,true);lh.setUint32(22,data.length,true);lh.setUint16(26,nm.length,true);
+  parts.push(lh.buffer,nm,data);
+  var ch=new DataView(new ArrayBuffer(46));
+  ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);ch.setUint16(14,0x21,true);
+  ch.setUint32(16,crc,true);ch.setUint32(20,data.length,true);ch.setUint32(24,data.length,true);ch.setUint16(28,nm.length,true);ch.setUint32(42,off,true);
+  cd.push(ch.buffer,nm);off+=30+nm.length+data.length;
+ }
+ var cs=0;cd.forEach(function(x){cs+=x.byteLength;});
+ var e=new DataView(new ArrayBuffer(22));
+ e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cs,true);e.setUint32(16,off,true);
+ return new Blob(parts.concat(cd,[e.buffer]),{type:'application/zip'});
+}
+function dlvClose(){var d=document.getElementById('deliverDlg');if(d)d.remove();}
+async function dlvDone(msg){
+ var D=window._dlv;
+ if(D&&D.del){for(var i=0;i<D.del.length;i++){try{await deletePendingItem(D.del[i]);}catch(e){}}}
+ dlvClose();await refreshPending();alert(msg);
+}
+async function dlvWrite(){
+ var D=window._dlv,root;
+ try{root=await showDirectoryPicker({mode:'readwrite'});}catch(e){return;}
+ var bad=[],ok=0;
+ for(var i=0;i<D.files.length;i++){
+  var f=D.files[i];
+  try{
+   var parts=String(f.id).split('/');
+   if(parts.length>1&&parts[0]===root.name)parts.shift();
+   var name=parts.pop(),dir=root;
+   for(var j=0;j<parts.length;j++)dir=await dir.getDirectoryHandle(parts[j]);
+   var fh=await dir.getFileHandle(name),w=await fh.createWritable();
+   await w.write(f.blob);await w.close();ok++;
+  }catch(e){console.warn(e);bad.push(f);}
+ }
+ if(bad.length){D.files=bad;alert(ok+' gravado(s). '+bad.length+' não encontrado(s) na pasta escolhida. Escolha a mesma pasta que você carregou, ou use "Baixar".');return;}
+ dlvDone(ok+' arquivo(s) gravado(s) na pasta, já com capa dentro do MP3.');
+}
+async function dlvDownload(){
+ var D=window._dlv,fl=D.files,blob,name;
+ if(fl.length===1){blob=fl[0].blob;name=fl[0].name;}
+ else{
+  var seen={};
+  blob=await buildZip(fl.map(function(f){var n=f.name;if(seen[n]){n=seen[n]+'_'+n;seen[f.name]++;}else seen[n]=1;return{name:n,blob:f.blob};}));
+  name='MP3_com_capa.zip';
+ }
+ var url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=name;document.body.appendChild(a);a.click();document.body.removeChild(a);
+ setTimeout(function(){URL.revokeObjectURL(url);},60000);
+ dlvDone('Download iniciado: '+name+'. Para a capa ficar de vez, substitua o(s) MP3 original(is) pelo(s) novo(s) na sua pasta de músicas'+(fl.length>1?' (extraia o ZIP antes)':'')+'.');
+}
+function dlvDialog(){
+ dlvClose();
+ var d=document.createElement('div');d.id='deliverDlg';d.className='modal-overlay show';
+ var n=window._dlv.files.length;
+ d.innerHTML='<div class="modal-content"><h3 class="text-lg font-bold text-white mb-2">MP3'+(n>1?'s':'')+' novo'+(n>1?'s':'')+' pronto'+(n>1?'s':'')+'</h3>'+
+  '<p class="text-sm text-zinc-300 mb-4">'+n+' arquivo'+(n>1?'s':'')+' com a capa gravada dentro. O navegador não troca o arquivo do aparelho sozinho: escolha como entregar.</p>'+
+  '<div class="flex flex-col gap-2">'+
+  (window.showDirectoryPicker?'<button onclick="dlvWrite()" class="px-4 py-3 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm font-semibold">Gravar na pasta (substitui os originais)</button>':'')+
+  '<button onclick="dlvDownload()" class="px-4 py-3 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-semibold">Baixar '+(n>1?'(ZIP)':'o MP3')+'</button>'+
+  '<button onclick="dlvClose()" class="px-4 py-2 text-xs font-semibold text-zinc-400">Decidir depois (a pendência continua)</button></div></div>';
+ document.body.appendChild(d);
+}
+async function substitutePending(pid){
+ var item=pendingItems.find(function(p){return p.id===pid;});if(!item)return;
+ var song=songs.find(function(s){return s.id===item.songId;});
+ if(!song){alert('Música não encontrada.');return;}
+ var isMp3=function(s){return /\.mp3$/i.test((s.file&&s.file.name)||s.id||'');};
+ var hasCover=item.type!=='metadata'&&item.coverBlob instanceof Blob;
+ var hasMeta=(item.type==='metadata'||item.type==='both')&&item.newValues;
+ var group=[song];
+ if(hasCover){
+  var keys=new Set([groupKeyOf(song.artist,song.album)]);
+  if(item.groupKey)keys.add(item.groupKey);
+  if(item.oldArtist||item.oldAlbum)keys.add(groupKeyOf(item.oldArtist,item.oldAlbum));
+  group=songs.filter(function(s){return keys.has(groupKeyOf(s.artist,s.album));});
+  if(!group.some(function(s){return s.id===song.id;}))group.push(song);
+ }
+ group=group.filter(isMp3);
+ if(!group.some(function(s){return s.id===song.id;})){alert('A substituição aceita apenas arquivos MP3.');return;}
+ var n=group.length;
+ if(!confirm(n>1?'A capa será gravada em '+n+' músicas deste álbum. Título, artista e demais dados de cada uma NÃO mudam (só "'+(song.title||song.name)+'" recebe os metadados editados). Continuar?':'Gerar o MP3 novo de "'+(song.title||song.name)+'"?'))return;
+ try{
+  var out=[];
+  for(var i=0;i<group.length;i++){
+   var s=group[i],own=s.id===song.id;
+   var cover=hasCover?item.coverBlob:(s.picture instanceof Blob?s.picture:null);
+   var vals=(own&&hasMeta)?item.newValues:null;
+   var blob=await buildTaggedMp3FromSong(s,cover,vals);
+   var f=new File([blob],(s.file&&s.file.name)||(s.name+'.mp3'),{type:'audio/mpeg'});
+   if(s.url)URL.revokeObjectURL(s.url);
+   s.file=f;s.url=URL.createObjectURL(f);
+   if(hasCover){releaseCoverUrl(s);s.picture=item.coverBlob;}
+   if(vals){s.title=vals.title||s.title;s.artist=vals.artist||s.artist;s.album=vals.album||s.album;s.year=vals.year||s.year;s.genre=vals.genre||s.genre;s.track=vals.track||s.track;}
+   await saveToDB(s);
+   out.push({id:s.id,name:f.name,blob:blob});
+  }
+  var ids=new Set(group.map(function(g){return g.id;}));
+  var del=pendingItems.filter(function(p){return p.id===pid||p.songId===song.id||(hasCover&&p.type==='cover'&&ids.has(p.songId));}).map(function(p){return p.id;});
+  window._dlv={files:out,del:del};
+  if(currentSongId&&ids.has(currentSongId)){
+   var cur=songs.find(function(x){return x.id===currentSongId;});
+   updateCover(cur);currentSongTitle.innerText=cur.title||cur.name||'Sem título';
+   currentSongMeta.innerText=(cur.artist||'Desconhecido')+(cur.album&&cur.album!=='Desconhecido'?' • '+cur.album:'');
+  }
+  updateArtists();renderSongs();
+  dlvDialog();
+ }catch(err){console.error(err);alert('Falha ao substituir: '+err.message);}
+}
+</script>
+
+<script id="patch-v9">
+/* ===== A) Textos do tour (edite aqui) ===== */
+var TOUR_TEXTOS=[
+ {o:['Tour rápido 👋','Bem-vindo! 👋'],t:'Bem-vindo! 👋',x:'Este tour mostra para que serve cada botão do player. Suas músicas ficam guardadas só no seu aparelho. Toque em "Próximo" para seguir.'},
+ {o:['Carregar Pasta'],t:'Carregar Pasta',x:'Escolha a pasta com seus MP3. O player lê título, artista, álbum e capa de cada música e guarda tudo no aparelho. Da próxima vez, já abre pronto, até sem internet.'},
+ {o:['Controles','Controles do player'],t:'Controles do player',x:'Toque em ▶ para tocar. Os botões ao lado embaralham, pulam de música ou repetem a atual. O coração favorita e os três pontinhos abrem: playlist, editar dados, ver letra e enviar o MP3.'},
+ {o:['Artistas'],t:'Artistas',x:'Lista todos os artistas da sua biblioteca. Toque em um nome para ver só as músicas dele; "Todos" volta à lista completa. A busca ajuda a achar rápido.'},
+ {o:['Músicas'],t:'Músicas',x:'Mostra todas as músicas. No campo de pesquisa, digite parte do título, artista ou álbum (ex.: o nome de uma banda) e a lista filtra na hora.'},
+ {o:['Playlists','Playlists e Favoritos'],t:'Playlists e Favoritos',x:'Abre seus Favoritos (músicas com coração) e as playlists que você criar. Para incluir uma música: três pontinhos › Adicionar à Playlist.'},
+ {o:['Limpar Tudo'],t:'Limpar Tudo',x:'Apaga o que o player guardou: músicas, favoritos, playlists e pendências. Seus arquivos MP3 originais não são apagados.'},
+ {o:['Editor de metadados'],t:'Editor de metadados',x:'Corrige as informações da música: título, artista, álbum, ano, gênero e faixa (ex.: trocar "Faixa 01" pelo nome real). Abra em três pontinhos › Editar metadados. Só funciona com MP3.'},
+ {o:['Preencher automaticamente','Preencher dados automaticamente'],t:'Preencher dados automaticamente',x:'Pesquisa a música na internet e mostra as versões encontradas. Ao escolher uma, preenche título, artista, álbum e ano e já tenta achar a capa. Confira antes de salvar.'},
+ {o:['Capa','Escolher a capa'],t:'Escolher a capa',x:'Cada botão de serviço (iTunes, Deezer, Cover Art Archive, TheAudioDB) pesquisa só nele, então você sabe de onde veio a capa. "Da galeria" usa uma imagem do aparelho. Ao final, toque em "Salvar capa": vale para o álbum todo.'},
+ {o:['Buscar capa','Buscar capa na internet','Escolher entre as capas'],t:'Escolher entre as capas',x:'Mostra as capas que o serviço encontrou. Embaixo de cada uma aparece "artista — álbum": confira se é o disco certo e toque nela. Se não achar nada, tente outro serviço.'},
+ {o:['Google Imagens (última opção)','Pesquisar no Google Imagens'],t:'Pesquisar no Google Imagens',x:'Última opção, manual. Abre o Google Imagens em outra aba, já com artista e álbum. Baixe a imagem, volte ao player e use "Da galeria".'},
+ {o:['Salvar metadados'],t:'Salvar metadados',x:'Aplica as mudanças no player na hora e cria uma pendência. Para ficarem gravadas no arquivo MP3, use "Substituir arquivo local" em Pendentes.'},
+ {o:['Pendentes'],t:'Pendentes',x:'Lista as mudanças de capa e de dados que você fez. Elas já valem no player, mas ainda não estão dentro do MP3. Capas achadas pelas buscas automáticas também caem aqui.'},
+ {o:['Substituir arquivo local'],t:'Substituir arquivo local',x:'Grava a capa e os dados dentro do MP3; sem isso, tudo some ao limpar o player. A capa vale para o álbum todo; título e demais dados, só para esta música. No PC grava na pasta; no celular baixa o arquivo para você trocar o original.'},
+ {o:['Buscar capas faltantes'],t:'Buscar capas faltantes',x:'Abre a busca em lote: o player procura sozinho a capa das músicas que ainda não têm imagem (precisam ter artista e álbum preenchidos).'},
+ {o:['Busca de capas em lote','Busca em lote'],t:'Busca em lote',x:'Toque para começar. As capas encontradas aparecem já marcadas: desmarque as erradas e toque em "Enviar para Pendentes". Só aceita capa com artista igual e álbum parecido, para evitar erro.'},
+ {o:['Letras automáticas','Letras sincronizadas'],t:'Letras sincronizadas',x:'Três pontinhos › Ver letra. O player procura sozinho (arquivo .lrc, dentro do MP3 ou na internet). Se for sincronizada, destaca o trecho atual, e tocar numa linha pula a música até ela.'},
+ {o:['Pronto! 🎶'],t:'Pronto! 🎶',x:'Toque em "Carregar Pasta" para começar. Este tour reaparece sempre que a biblioteca estiver vazia.'}
+];
+if(typeof TOUR!=='undefined'){
+ TOUR_TEXTOS.forEach(function(n){for(var i=0;i<TOUR.length;i++){if(n.o.indexOf(TOUR[i].t)>=0){TOUR[i].t=n.t;TOUR[i].x=n.x;break;}}});
+}
+
+/* ===== B) Busca de capa por serviço: iTunes, Deezer, Cover Art Archive, TheAudioDB (e Google por último) ===== */
+var SRC_NAME={itunes:'iTunes',deezer:'Deezer',caa:'Cover Art Archive',tadb:'TheAudioDB'};
+function srcQ(a,b){return[a,b].filter(Boolean).join(' ');}
+function srcClean(s){return String(s||'').replace(/["\\]/g,' ').trim();}
+function srcJsonp(url){
+ return new Promise(function(res,rej){
+  var cb='dz_'+Date.now()+Math.floor(Math.random()*1e4),s=document.createElement('script');
+  var t=setTimeout(function(){cl();rej(new Error('timeout'));},10000);
+  function cl(){clearTimeout(t);delete window[cb];s.remove();}
+  window[cb]=function(d){cl();res(d);};
+  s.onerror=function(){cl();rej(new Error('jsonp'));};
+  s.src=url+(url.indexOf('?')<0?'?':'&')+'output=jsonp&callback='+cb;
+  document.head.appendChild(s);
+ });
+}
+var SRC_FN={
+ itunes:async function(a,al){
+  var r=await fetch('https://itunes.apple.com/search?term='+encodeURIComponent(srcQ(a,al))+'&entity=album&limit=15');
+  if(!r.ok)throw new Error('http');var d=await r.json();
+  return(d.results||[]).filter(function(x){return x.artworkUrl100;}).map(function(x){return{url:x.artworkUrl100.replace(/\d+x\d+bb\./,'600x600bb.'),artist:x.artistName,album:x.collectionName};});
+ },
+ deezer:async function(a,al){
+  var u='https://api.deezer.com/search/album?q='+encodeURIComponent(srcQ(a,al)),d;
+  try{var r=await fetch(u);if(!r.ok)throw new Error('http');d=await r.json();}catch(e){d=await srcJsonp(u);}
+  return(d.data||[]).filter(function(x){return x.cover_xl||x.cover_big;}).map(function(x){return{url:x.cover_xl||x.cover_big,artist:x.artist&&x.artist.name,album:x.title};});
+ },
+ caa:async function(a,al){
+  var q=[];if(al)q.push('releasegroup:"'+srcClean(al)+'"');if(a)q.push('artist:"'+srcClean(a)+'"');
+  var r=await fetch('https://musicbrainz.org/ws/2/release-group/?query='+encodeURIComponent(q.join(' AND '))+'&fmt=json&limit=12',{headers:{'Accept':'application/json'}});
+  if(!r.ok)throw new Error('http');var d=await r.json();
+  return(d['release-groups']||[]).map(function(x){return{url:'https://coverartarchive.org/release-group/'+x.id+'/front-500',artist:(x['artist-credit']||[]).map(function(c){return c.name||(c.artist&&c.artist.name)||'';}).join(', '),album:x.title};});
+ },
+ tadb:async function(a,al){
+  if(!a)throw new Error('O TheAudioDB precisa do artista preenchido.');
+  var keys=['123','2'],d=null;
+  for(var i=0;i<keys.length&&!d;i++){
+   try{
+    var u='https://www.theaudiodb.com/api/v1/json/'+keys[i]+'/searchalbum.php?s='+encodeURIComponent(a)+(al?'&a='+encodeURIComponent(al):'');
+    var r=await fetch(u);if(!r.ok)continue;var j=await r.json();if(j&&j.album)d=j;else if(j)d={album:[]};
+   }catch(e){}
+  }
+  if(!d)throw new Error('http');
+  return(d.album||[]).map(function(x){var im=x.strAlbumThumbHQ||x.strAlbumThumb||x.strAlbumCDart;return im?{url:im,artist:x.strArtist,album:x.strAlbum}:null;}).filter(Boolean);
+ }
+};
+var _srcTok=0,_srcLeft=0,_srcNm='';
+async function coverSearchBySource(src){
+ var g=function(i){return document.getElementById(i);},v=function(i){return g(i).value.trim();};
+ var artist=v('editArtist'),album=v('editAlbum'),q2=album||v('editTitle'),nm=SRC_NAME[src];
+ if(!artist&&!album){alert('Preencha pelo menos o Artista ou o Álbum.');return;}
+ var modal=g('coverSearchModal'),results=g('coverSearchResults'),status=g('coverSearchStatus');
+ modal.classList.add('show');results.innerHTML='';status.textContent='Buscando no '+nm+'...';
+ var tok=++_srcTok,items;_srcNm=nm;
+ try{items=await SRC_FN[src](artist,q2);}
+ catch(e){if(tok===_srcTok)status.textContent=(e&&e.message&&/precisa/.test(e.message))?e.message:'Não foi possível consultar o '+nm+' agora (sem internet ou serviço indisponível). Tente outro serviço.';return;}
+ if(tok!==_srcTok)return;
+ var seen={};items=items.filter(function(x){if(seen[x.url])return false;seen[x.url]=1;return true;});
+ if(!items.length){status.textContent='O '+nm+' não encontrou "'+srcQ(artist,q2)+'". Tente outro serviço.';return;}
+ _srcLeft=items.length;
+ status.textContent=items.length+' capa(s) no '+nm+'. Confira "artista — álbum" e toque na certa:';
+ results.innerHTML=items.map(function(x){
+  return'<div class="cursor-pointer rounded-lg overflow-hidden border-2 border-transparent hover:border-green-500 bg-zinc-800" data-url="'+escapeAttr(x.url)+'" data-artist="'+escapeAttr(x.artist||'')+'" data-album="'+escapeAttr(x.album||'')+'" onclick="pickSrcCover(this)"><img src="'+escapeAttr(x.url)+'" class="w-full aspect-square object-cover" loading="lazy" onerror="srcImgFail(this)"><div class="px-1.5 py-1 text-[10px] text-zinc-400 truncate">'+escapeHtml(x.artist||'—')+' — '+escapeHtml(x.album||'—')+'</div></div>';
+ }).join('');
+}
+function srcImgFail(img){
+ img.parentElement.style.display='none';_srcLeft--;
+ if(_srcLeft<=0)document.getElementById('coverSearchStatus').textContent='O '+_srcNm+' achou o álbum, mas sem imagem de capa. Tente outro serviço.';
+}
+function srcLoadBlob(url){
+ return fetch(url,{mode:'cors'}).then(function(r){if(!r.ok)throw new Error('http');return r.blob();}).then(function(b){return optimizeImage(b,500);})
+ .catch(function(){return new Promise(function(res,rej){var i=new Image();i.crossOrigin='anonymous';i.onload=function(){optimizeImage(i,500).then(res,rej);};i.onerror=function(){rej(new Error('img'));};i.src=url;});});
+}
+async function pickSrcCover(el){
+ var url=el.dataset.url,artist=el.dataset.artist,album=el.dataset.album,nm=_srcNm;
+ var st=document.getElementById('coverSearchStatus');st.textContent='Baixando imagem...';
+ var blob=null;
+ try{blob=await srcLoadBlob(url);}catch(e){}
+ if(!blob){try{blob=await srcLoadBlob('https://wsrv.nl/?url='+encodeURIComponent(url)+'&w=600&output=jpg');}catch(e){}}
+ if(!blob){st.textContent='Não foi possível baixar esta imagem. Toque em outra.';return;}
+ editorCoverBlob=blob;editorCoverMeta={artist:artist||null,album:album||null};updateEditorCoverPreview();
+ document.getElementById('coverSearchModal').classList.remove('show');
+ document.getElementById('editorSearchStatus').textContent='Capa do '+nm+' selecionada ('+(artist||'—')+' — '+(album||'—')+'). Toque em "Salvar capa" para confirmar.';
+}
+(function(){
+ var ft=document.getElementById('editorFileType'),box=ft&&ft.nextElementSibling;if(!box)return;
+ var fi=document.getElementById('editCoverFile');
+ var dz='';[[0,['#A238FF']],[1,['#A238FF','#EB2E2E']],[2,['#A238FF','#EB2E2E','#FF9900']],[3,['#A238FF','#EB2E2E','#FF9900','#40AB5D']],[4,['#A238FF','#EB2E2E','#FF9900','#40AB5D','#00C7F2']]].forEach(function(c){c[1].forEach(function(col,r){dz+='<rect x="'+(0.5+c[0]*4.8)+'" y="'+(19-r*4.4)+'" width="3.8" height="3.6" rx=".6" fill="'+col+'"/>';});});
+ var ICO={
+  itunes:'<svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24"><defs><linearGradient id="gItn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FA5C7C"/><stop offset="1" stop-color="#F4223D"/></linearGradient></defs><rect width="24" height="24" rx="5.5" fill="url(#gItn)"/><path fill="#fff" d="M16.5 5.2v9.1a2.3 2.3 0 11-1.4-2.1V7.7l-5 1.1v7.1a2.3 2.3 0 11-1.4-2.1V7.2z"/></svg>',
+  deezer:'<svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">'+dz+'</svg>',
+  caa:'<svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#EB743B"/><circle cx="12" cy="12" r="4.2" fill="#fff"/><circle cx="12" cy="12" r="1.6" fill="#EB743B"/></svg>',
+  tadb:'<svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#0D9488"/><path stroke="#fff" stroke-width="2" stroke-linecap="round" d="M6 14v-4M10 17V7M14 15V9M18 13v-2"/></svg>',
+  google:'<svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>'
+ };
+ var ic=function(p){return'<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="'+p+'"/></svg>';};
+ var base='px-3 py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors ';
+ var src='bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700';
+ box.className='grid grid-cols-2 gap-2 mt-3 w-full';
+ box.innerHTML=
+  '<div class="col-span-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 text-left">Buscar capa na internet</div>'+
+  '<button onclick="coverSearchBySource(\'itunes\')" class="'+base+src+'">'+ICO.itunes+'iTunes</button>'+
+  '<button onclick="coverSearchBySource(\'deezer\')" class="'+base+src+'">'+ICO.deezer+'Deezer</button>'+
+  '<button onclick="coverSearchBySource(\'caa\')" class="'+base+src+'">'+ICO.caa+'Cover Art Archive</button>'+
+  '<button onclick="coverSearchBySource(\'tadb\')" class="'+base+src+'">'+ICO.tadb+'TheAudioDB</button>'+
+  '<button onclick="openGoogleImages()" class="col-span-2 '+base+'bg-white hover:bg-zinc-200 text-zinc-800">'+ICO.google+'Google Imagens (manual)</button>'+
+  '<div class="col-span-2 border-t border-zinc-700 my-1"></div>'+
+  '<button onclick="document.getElementById(\'editCoverFile\').click()" class="'+base+'bg-zinc-700 hover:bg-zinc-600 text-white">'+ic('M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12')+'Da galeria</button>'+
+  '<button onclick="clearEditorCover()" class="'+base+'bg-zinc-800 hover:bg-zinc-700 text-red-400 border border-zinc-700">'+ic('M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16')+'Remover</button>'+
+  '<button id="btnSaveEditedCover" onclick="saveEditedCover()" class="col-span-2 '+base+'bg-green-600 hover:bg-green-500 text-white">'+ic('M5 13l4 4L19 7')+'<span>Salvar capa</span></button>';
+ if(fi)box.appendChild(fi);
+ if(typeof updateEditorSaveButtons==='function')updateEditorSaveButtons();
+})();
+</script>
+
+<script id="patch-v10">
+/* ===== A) Letras: busca automática mais robusta e sem "não achei" permanente ===== */
+async function lyOnline(s){
+ window._lyNet=false;
+ var enc=encodeURIComponent;
+ var title=String(s.title||s.name||''),artist=(s.artist&&s.artist!=='Desconhecido')?s.artist:'';
+ var clean=title.replace(/^\s*\d{1,3}\s*[-._)]\s*/,'').replace(/[\(\[][^\)\]]*[\)\]]/g,' ').replace(/\s+/g,' ').trim()||title;
+ var tries=['track_name='+enc(title)+(artist?'&artist_name='+enc(artist):''),'q='+enc((artist+' '+clean).trim()),'track_name='+enc(clean)];
+ var done={},fails=0,n=0;
+ for(var i=0;i<tries.length;i++){
+  if(done[tries[i]])continue;done[tries[i]]=1;n++;
+  try{
+   var c=new AbortController(),to=setTimeout(function(){c.abort();},8000);
+   var r=await fetch('https://lrclib.net/api/search?'+tries[i],{signal:c.signal});clearTimeout(to);
+   if(!r.ok){fails++;continue;}
+   var a=((await r.json())||[]).filter(function(x){return x.syncedLyrics||x.plainLyrics;});
+   if(!a.length)continue;
+   var d=(currentSongId===s.id&&isFinite(audio.duration))?audio.duration:0;
+   var sc=function(x){return(x.syncedLyrics?3:0)-(d&&x.duration?Math.min(Math.abs(x.duration-d),30)/6:0);};
+   a.sort(function(x,y){return sc(y)-sc(x);});
+   var p=parseLrc(a[0].syncedLyrics||a[0].plainLyrics);
+   if(p.lines.length)return lyMk(s,p,'internet');
+  }catch(e){fails++;}
+ }
+ if(n>0&&fails===n)window._lyNet=true;
+ return null;
+}
+async function lyShow(id){
+ var s=songs.find(function(x){return x.id===id;});if(!s)return;
+ var tok=++lyTok;lyId=id;lyRec=null;lyIdx=-1;
+ lyEl('lyTitle').textContent=s.title||s.name||'';
+ lyEl('lyMeta').textContent=(s.artist||'')+(s.album&&s.album!=='Desconhecido'?' • '+s.album:'');
+ var src=getPictureSrc(s);lyEl('lyCover').innerHTML=src?'<img src="'+escapeAttr(src)+'" class="w-full h-full object-cover" alt="">':'♪';
+ lyEl('lyBody').innerHTML='<div class="ly-empty">Procurando letra…</div>';lyStatus('');
+ var rec=null;
+ try{rec=await lget(id);}catch(e){}
+ if(tok!==lyTok)return;
+ if(rec&&(!rec.lines||!rec.lines.length))rec=null; /* resultado "não achei" antigo não vale mais */
+ if(!rec){
+  rec=await lyFindLocal(s);if(tok!==lyTok)return;
+  if(!rec){lyStatus('Buscando na internet…');rec=await lyOnline(s);if(tok!==lyTok)return;}
+  if(rec){try{await lput(rec);}catch(e){}} /* só guarda letra encontrada */
+ }
+ lyRec=rec&&rec.lines&&rec.lines.length?rec:null;lyRender();
+ if(!lyRec&&window._lyNet){var e2=document.querySelector('#lyBody .ly-empty');if(e2)e2.textContent='Não consegui consultar a internet agora. Feche e abra a letra de novo quando estiver conectado.';}
+}
+
+/* ===== B) Substituir arquivo local: preserva as outras informações do MP3 (letra embutida, comentários etc.) ===== */
+function id3KeepFrames(orig,dropCover){
+ var out=[];
+ if(orig.length<10||orig[0]!==0x49||orig[1]!==0x44||orig[2]!==0x33)return out;
+ var ver=orig[3],flags=orig[5];
+ if((ver!==3&&ver!==4)||(flags&0x80))return out;
+ var size=((orig[6]&127)<<21)|((orig[7]&127)<<14)|((orig[8]&127)<<7)|(orig[9]&127);
+ var pos=10,end=Math.min(orig.length,10+size);
+ if(flags&0x40){
+  pos+=ver===4?(((orig[10]&127)<<21)|((orig[11]&127)<<14)|((orig[12]&127)<<7)|(orig[13]&127)):(orig[10]*16777216+(orig[11]<<16)+(orig[12]<<8)+orig[13]+4);
+ }
+ var drop={TIT2:1,TPE1:1,TALB:1,TDRC:1,TCON:1,TRCK:1,TYER:1,TDAT:1,TIME:1,TRDA:1,TORY:1,IPLS:1,RVAD:1,EQUA:1,TSIZ:1};
+ while(pos+10<=end){
+  var id=String.fromCharCode(orig[pos],orig[pos+1],orig[pos+2],orig[pos+3]);
+  if(!/^[A-Z0-9]{4}$/.test(id))break;
+  var fs=ver===4?(((orig[pos+4]&127)<<21)|((orig[pos+5]&127)<<14)|((orig[pos+6]&127)<<7)|(orig[pos+7]&127)):(orig[pos+4]*16777216+(orig[pos+5]<<16)+(orig[pos+6]<<8)+orig[pos+7]);
+  var f2=orig[pos+9],total=10+fs;
+  if(fs<=0||pos+total>end)break;
+  var flagged=ver===4?(f2&0x4F)!==0:(f2&0xE0)!==0;
+  if(!flagged&&!drop[id]&&!(dropCover&&id==='APIC')){out.push(makeId3Frame(id,orig.slice(pos+10,pos+total)));}
+  pos+=total;
+ }
+ return out;
+}
+async function buildTaggedMp3FromSong(song,coverBlob,values){
+ if(!song||!song.file||!/\.mp3$/i.test(song.file.name||song.id||''))throw new Error('A substituição aceita arquivos MP3.');
+ var v=values||{};
+ var tags={TIT2:v.title||song.title||'',TPE1:v.artist||song.artist||'',TALB:v.album||song.album||'',TDRC:v.year||song.year||'',TCON:v.genre||song.genre||'',TRCK:v.track||song.track||''};
+ var original=new Uint8Array(await song.file.arrayBuffer());
+ var frames=[];
+ for(var k in tags){if(tags[k])frames.push(makeId3Frame(k,encodeId3Text(tags[k])));}
+ if(coverBlob){
+  var mime=coverBlob.type||'image/jpeg',mb=new TextEncoder().encode(mime),img=new Uint8Array(await coverBlob.arrayBuffer());
+  var body=new Uint8Array(1+mb.length+1+1+1+img.length),o=0;
+  body[o++]=3;body.set(mb,o);o+=mb.length;body[o++]=0;body[o++]=3;body[o++]=0;body.set(img,o);
+  frames.push(makeId3Frame('APIC',body));
+ }
+ var kept=[];try{kept=id3KeepFrames(original,!!coverBlob);}catch(e){kept=[];}
+ var all=frames.concat(kept);
+ var total=all.reduce(function(a,f){return a+f.length;},0);
+ var header=new Uint8Array([0x49,0x44,0x33,4,0,0].concat(syncSafeInt(total)));
+ var start=0,end=original.length;
+ if(original.length>=10&&original[0]===0x49&&original[1]===0x44&&original[2]===0x33){
+  var old=((original[6]&0x7f)<<21)|((original[7]&0x7f)<<14)|((original[8]&0x7f)<<7)|(original[9]&0x7f);
+  start=Math.min(original.length,10+old+((original[3]===4&&(original[5]&0x10))?10:0));
+ }
+ if(end>=128&&original[end-128]===0x54&&original[end-127]===0x41&&original[end-126]===0x47)end-=128;
+ return new Blob([header].concat(all,[original.slice(start,end)]),{type:'audio/mpeg'});
+}
+</script>
+
+<script id="patch-v11">
+/* Corrige "Ver letra" que não abria: a função original procurava a caixa de colar letra (lyPaste), que foi removida */
+function openLyrics(id){
+ var s=songs.find(function(x){return x.id===id;});if(!s)return;
+ ['libraryView','pendingView','metadataEditorView'].forEach(function(v){var e=lyEl(v);if(e)e.classList.add('hidden');});
+ var p=lyEl('lyPaste');if(p)p.classList.add('hidden');
+ lyEl('lyricsView').style.display='flex';
+ if(currentSongId!==id){var i=filteredSongs.findIndex(function(x){return x.id===id;});if(i>=0)playAtFilteredIndex(i);}
+ lyShow(id);
+}
+function toggleLyPaste(){var p=lyEl('lyPaste');if(p)p.classList.toggle('hidden');}
+</script>
+
+<script id="patch-v12">
+/* ===== A) Busca de capas em lote e em segundo plano: iTunes → Deezer → Cover Art Archive → TheAudioDB ===== */
+var MS_SRC=[['itunes','iTunes'],['deezer','Deezer'],['caa','Cover Art Archive'],['tadb','TheAudioDB']];
+var MS_NAME={itunes:'iTunes',deezer:'Deezer',caa:'Cover Art Archive',tadb:'TheAudioDB'};
+var MS_GAP={caa:1100,tadb:2100},ms_last={};
+function ms_clean(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();}
+async function ms_wait(key){var g=MS_GAP[key];if(!g)return;var w=(ms_last[key]||0)+g-Date.now();if(w>0)await new Promise(function(r){setTimeout(r,w);});ms_last[key]=Date.now();}
+function ms_imgOk(url){return new Promise(function(res){var i=new Image(),t=setTimeout(function(){i.src='';res(false);},8000);i.onload=function(){clearTimeout(t);res(true);};i.onerror=function(){clearTimeout(t);res(false);};i.src=url;});}
+async function ms_findCover(artist,album,onStep){
+ var ta=ms_clean(artist),tl=ms_clean(album);
+ for(var s=0;s<MS_SRC.length;s++){
+  var key=MS_SRC[s][0],nm=MS_SRC[s][1];
+  if(onStep)onStep(nm);
+  try{
+   await ms_wait(key);
+   var items=await SRC_FN[key](artist,album);
+   var valid=items.filter(function(x){return ms_clean(x.artist)===ta&&ms_clean(x.album).indexOf(tl)>=0;});
+   for(var k=0;k<valid.length&&k<3;k++){
+    if(key==='caa'&&!(await ms_imgOk(valid[k].url)))continue;
+    return{url:valid[k].url,artist:valid[k].artist,album:valid[k].album,key:key,nm:nm};
+   }
+  }catch(e){}
+ }
+ return null;
+}
+async function ms_blob(url){
+ try{return await srcLoadBlob(url);}catch(e){}
+ return await srcLoadBlob('https://wsrv.nl/?url='+encodeURIComponent(url)+'&w=600&output=jpg');
+}
+async function startBatchSearch(){
+ var btn=document.querySelector('#batchCoverModal button[onclick="startBatchSearch()"]');
+ if(btn){btn.disabled=true;btn.textContent='Buscando...';}
+ var progress=document.getElementById('batchProgress'),bar=document.getElementById('batchProgressBar'),txt=document.getElementById('batchProgressText'),cnt=document.getElementById('batchProgressCount'),box=document.getElementById('batchResults');
+ var done=function(){if(btn){btn.disabled=false;btn.textContent='Buscar Capas Faltantes';}};
+ progress.classList.remove('hidden');box.innerHTML='';
+ var todo=songs.filter(function(s){return !s.picture&&s.artist!=='Desconhecido'&&s.album!=='Desconhecido';});
+ if(!todo.length){box.innerHTML='<div class="text-center text-zinc-500 py-8">Todas as músicas já possuem capa.</div>';progress.classList.add('hidden');done();return;}
+ var grouped=new Map();
+ todo.forEach(function(song){var k=groupKeyOf(song.artist,song.album);if(!grouped.has(k))grouped.set(k,{artist:song.artist,album:song.album,songs:[]});grouped.get(k).songs.push(song);});
+ var groups=Array.from(grouped.values());
+ batchSongs=[];batchSelectedIds.clear();
+ var n=0,porServico={};
+ for(var g=0;g<groups.length;g++){
+  var grp=groups[g];n++;
+  txt.textContent='Buscando: '+grp.artist+' - '+grp.album;cnt.textContent=n+'/'+groups.length;bar.style.width=((n/groups.length)*100)+'%';
+  var f=await ms_findCover(grp.artist,grp.album,function(nm){txt.textContent=grp.artist+' - '+grp.album+' ('+nm+')';});
+  if(f){
+   porServico[f.nm]=(porServico[f.nm]||0)+1;
+   grp.songs.forEach(function(song){batchSongs.push({song:song,coverUrl:f.url,source:f.nm,srcKey:f.key,groupArtist:grp.artist,groupAlbum:grp.album,coverArtist:f.artist,coverAlbum:f.album});});
+  }
+  await new Promise(function(r){setTimeout(r,200);});
+ }
+ progress.classList.add('hidden');done();
+ if(!batchSongs.length){box.innerHTML='<div class="text-center text-zinc-500 py-8">Nenhuma capa foi encontrada nos 4 serviços (iTunes, Deezer, Cover Art Archive e TheAudioDB) para as músicas pendentes.</div>';return;}
+ var resumo=Object.keys(porServico).map(function(k){return k+': '+porServico[k];}).join(' • ');
+ box.innerHTML='<div class="text-xs text-zinc-400 mb-2">Álbuns com capa encontrada ('+groups.length+' pesquisados) — '+escapeHtml(resumo)+'</div>'+
+  batchSongs.map(function(item,i){return '<div class="batch-card" id="batch-card-'+i+'"><input type="checkbox" class="w-5 h-5 accent-green-500 rounded border-zinc-600 bg-zinc-800 cursor-pointer" onchange="toggleBatchSelection('+i+', this.checked)"><img src="'+escapeAttr(item.coverUrl)+'" class="w-12 h-12 rounded object-cover border border-zinc-700 flex-shrink-0" loading="lazy"><div class="flex-1 min-w-0"><div class="text-sm font-semibold text-white truncate">'+escapeHtml(item.song.title)+'</div><div class="text-xs text-zinc-400 truncate">'+escapeHtml(item.song.artist)+' • '+escapeHtml(item.song.album)+'</div></div><div class="text-[10px] font-bold text-green-500 px-2 py-1 bg-zinc-800 rounded ml-2 text-center">'+escapeHtml(item.source)+'</div></div>';}).join('');
+ toggleSelectAllBatch();
+}
+async function applyBatchCovers(){
+ if(batchSelectedIds.size===0){alert('Selecione pelo menos uma capa.');return;}
+ var btn=document.getElementById('btnApplyBatch'),orig=btn.textContent,saved=0,cache={};
+ btn.disabled=true;btn.textContent='Enviando (0/'+batchSelectedIds.size+')...';
+ var items=batchSongs.filter(function(it){return batchSelectedIds.has(it.song.id);});
+ for(var i=0;i<items.length;i++){
+  var it=items[i];
+  try{
+   var blob=cache[it.coverUrl]||(cache[it.coverUrl]=await ms_blob(it.coverUrl));
+   await applyCoverPending(it.song,blob,{source:it.srcKey+'|batch',oldArtist:it.song.artist,newArtist:it.song.artist,oldAlbum:it.song.album,newAlbum:it.song.album,groupArtist:it.groupArtist,groupAlbum:it.groupAlbum,coverArtist:it.coverArtist,coverAlbum:it.coverAlbum});
+   saved++;btn.textContent='Enviando ('+saved+'/'+batchSelectedIds.size+')...';
+  }catch(err){console.warn('Erro ao processar capa em lote:',it.song.title,err);}
+ }
+ btn.disabled=false;btn.textContent=orig;renderSongs();
+ alert(saved+' capa(s) enviadas para a aba Pendentes.');
+ document.getElementById('batchCoverModal').classList.remove('show');
+ await refreshPending();
+}
+async function fetchCoverInBackground(song){
+ if(!song||song.picture||backgroundSearchInProgress||song.artist==='Desconhecido'||song.album==='Desconhecido')return;
+ backgroundSearchInProgress=true;
+ try{
+  var f=await ms_findCover(song.artist,song.album);
+  if(f){
+   var blob=await ms_blob(f.url);
+   await applyCoverPending(song,blob,{source:f.key+'|background',oldArtist:song.artist,newArtist:song.artist,oldAlbum:song.album,newAlbum:song.album,groupArtist:song.artist,groupAlbum:song.album,coverArtist:f.artist,coverAlbum:f.album});
+  }
+ }catch(e){}finally{backgroundSearchInProgress=false;}
+}
+/* Pendentes: mostra qual serviço achou a capa */
+var _rpt12=renderPendingTab;
+renderPendingTab=function(){
+ _rpt12();
+ try{
+  document.querySelectorAll('#pendingList .pending-card').forEach(function(card){
+   var it=pendingItems.find(function(p){return p.id===card.dataset.pid;});
+   if(!it||!it.source||String(it.source).indexOf('|')<0)return;
+   var p=it.source.split('|'),nm=MS_NAME[p[0]]||'',modo=p[1]==='batch'?'em lote':p[1]==='background'?'segundo plano':'';
+   if(!nm)return;
+   Array.from(card.querySelectorAll('.pc-body div')).forEach(function(d){
+    if(/^Imagem:/.test(d.textContent))d.insertAdjacentHTML('beforeend',' <span class="text-zinc-500">(via '+nm+(modo?' · '+modo:'')+')</span>');
+   });
+  });
+ }catch(e){}
+};
+
+/* ===== B) Busca de metadados: MusicBrainz, iTunes e Deezer ===== */
+var MD_NAME={mb:'MusicBrainz',itunes:'iTunes',deezer:'Deezer'};
+var MD_LOGO={
+ mb:'<svg class="w-6 h-6" viewBox="0 0 24 24"><path fill="#BA478F" d="M12 1.5 3 6.75v10.5l9 5.25z"/><path fill="#EB743B" d="M12 1.5l9 5.25v10.5l-9 5.25z"/></svg>',
+ itunes:'<svg class="w-6 h-6" viewBox="0 0 24 24"><defs><linearGradient id="gItm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FA5C7C"/><stop offset="1" stop-color="#F4223D"/></linearGradient></defs><rect width="24" height="24" rx="5.5" fill="url(#gItm)"/><path fill="#fff" d="M16.5 5.2v9.1a2.3 2.3 0 11-1.4-2.1V7.7l-5 1.1v7.1a2.3 2.3 0 11-1.4-2.1V7.2z"/></svg>',
+ deezer:(function(){var s='';[[0,['#A238FF']],[1,['#A238FF','#EB2E2E']],[2,['#A238FF','#EB2E2E','#FF9900']],[3,['#A238FF','#EB2E2E','#FF9900','#40AB5D']],[4,['#A238FF','#EB2E2E','#FF9900','#40AB5D','#00C7F2']]].forEach(function(c){c[1].forEach(function(col,r){s+='<rect x="'+(0.5+c[0]*4.8)+'" y="'+(19-r*4.4)+'" width="3.8" height="3.6" rx=".6" fill="'+col+'"/>';});});return'<svg class="w-6 h-6" viewBox="0 0 24 24">'+s+'</svg>';})()
+};
+async function mdGet(url){
+ try{var r=await fetch(url);if(!r.ok)throw new Error('http');return await r.json();}
+ catch(e){return await srcJsonp(url);}
+}
+async function mdSearch(src,title,artist){
+ var enc=encodeURIComponent;
+ if(src==='mb'){
+  var cl=function(v){return String(v||'').replace(/["\\]/g,' ').trim();},parts=[];
+  if(title)parts.push('recording:"'+cl(title)+'"');if(artist)parts.push('artist:"'+cl(artist)+'"');
+  var r=await fetch('https://musicbrainz.org/ws/2/recording/?query='+enc(parts.join(' AND '))+'&fmt=json&limit='+(artist&&!title?25:10)+'&inc=releases',{headers:{'Accept':'application/json'}});
+  if(!r.ok)throw new Error('http');var d=await r.json();
+  return(d.recordings||[]).map(function(m){var rel=m.releases&&m.releases[0];return{src:'mb',title:m.title||'',artist:(m['artist-credit']||[]).map(function(a){return a.name||(a.artist&&a.artist.name)||'';}).filter(Boolean).join(', '),album:(rel&&rel.title)||'',year:((rel&&rel.date)||'').slice(0,4),raw:m};});
+ }
+ if(src==='itunes'){
+  var rr=await fetch('https://itunes.apple.com/search?term='+enc([artist,title].filter(Boolean).join(' '))+'&entity=song&limit='+(title?15:25));
+  if(!rr.ok)throw new Error('http');var dd=await rr.json();
+  return(dd.results||[]).map(function(x){return{src:'itunes',title:x.trackName||'',artist:x.artistName||'',album:x.collectionName||'',year:(x.releaseDate||'').slice(0,4),genre:x.primaryGenreName||'',track:x.trackNumber?String(x.trackNumber):'',coverUrl:x.artworkUrl100?x.artworkUrl100.replace(/\d+x\d+bb\./,'600x600bb.'):''};});
+ }
+ var q=[];if(artist)q.push('artist:"'+String(artist).replace(/"/g,' ')+'"');if(title)q.push('track:"'+String(title).replace(/"/g,' ')+'"');
+ var dz=await mdGet('https://api.deezer.com/search/track?q='+enc(q.join(' '))+'&limit='+(title?15:25));
+ if(!(dz.data&&dz.data.length)&&artist&&title)dz=await mdGet('https://api.deezer.com/search/track?q='+enc(artist+' '+title)+'&limit=15');
+ return(dz.data||[]).map(function(x){return{src:'deezer',title:x.title||'',artist:(x.artist&&x.artist.name)||'',album:(x.album&&x.album.title)||'',year:'',coverUrl:(x.album&&(x.album.cover_xl||x.album.cover_big))||''};});
+}
+async function metaSearchBySource(src){
+ var song=songs.find(function(s){return s.id===editorSongId;});if(!song)return;
+ var g=function(i){return document.getElementById(i);},only=g('editorSearchArtistOnly').checked;
+ var title=only?'':(g('editTitle').value.trim()||song.title||song.name||'');
+ var artist=g('editorSearchArtist').value.trim()||g('editArtist').value.trim()||(song.artist==='Desconhecido'?'':song.artist||'');
+ if(!title&&!artist){alert('Informe o título ou o artista.');return;}
+ var st=g('editorSearchStatus'),box=g('editorMatches'),nm=MD_NAME[src];
+ st.textContent='Consultando '+nm+'...';box.classList.add('hidden');
+ var items;
+ try{items=await mdSearch(src,title,artist);}catch(e){console.error(e);st.textContent='Não foi possível consultar o '+nm+' agora (sem internet ou serviço indisponível). Tente outro serviço.';return;}
+ if(!items.length){st.textContent='O '+nm+' não encontrou resultados. Tente outro serviço.';return;}
+ window._metaMatches=items;
+ box.innerHTML=items.map(function(m,i){return'<button onclick="applyMetaMatch('+i+')" class="w-full text-left p-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700"><span class="block text-sm font-semibold text-white">'+escapeHtml(m.title||'Sem título')+'</span><span class="block text-xs text-zinc-300 mt-1">'+escapeHtml(m.artist||'Artista desconhecido')+(m.album?' • '+escapeHtml(m.album):'')+(m.year?' • '+m.year:'')+'</span></button>';}).join('');
+ box.classList.remove('hidden');
+ st.textContent=items.length+' resultado(s) no '+nm+'. Escolha a versão correta:';
+}
+function mdSet(id,val){var el=document.getElementById(id);if(!el)return;el.value=val;el.dispatchEvent(new Event('input',{bubbles:true}));}
+async function applyMetaMatch(i){
+ var m=(window._metaMatches||[])[i];if(!m)return;
+ var nm=MD_NAME[m.src],st=document.getElementById('editorSearchStatus');
+ mdSet('editTitle',m.title||'');mdSet('editArtist',m.artist||'');mdSet('editorSearchArtist',m.artist||'');
+ mdSet('editAlbum',m.album||'');
+ if(m.year)mdSet('editYear',m.year);
+ if(m.genre)mdSet('editGenre',m.genre);
+ if(m.track)mdSet('editTrack',m.track);
+ document.getElementById('editorMatches').classList.add('hidden');
+ st.textContent='Dados do '+nm+' preenchidos. Procurando a capa...';
+ var cover=null,from='';
+ try{if(m.src==='mb'){cover=await searchCoverInMusicBrainz(m.raw);if(cover)from='Cover Art Archive';}}catch(e){}
+ if(!cover&&m.coverUrl){try{cover=await ms_blob(m.coverUrl);if(cover)from=nm;}catch(e){}}
+ if(!cover){try{cover=await searchCoverInITunes(m.artist,m.album,m.title);if(cover)from='iTunes';}catch(e){}}
+ if(!cover){try{cover=await searchCoverInDeezer(m.artist,m.album,m.title);if(cover)from='Deezer';}catch(e){}}
+ if(cover){
+  editorCoverBlob=cover;editorCoverMeta={artist:m.artist||null,album:m.album||null};updateEditorCoverPreview();
+  st.textContent='Dados do '+nm+' e capa do '+from+'. Confira e salve (metadados e capa são salvos separadamente).';
+ }else{st.textContent='Dados do '+nm+' preenchidos, mas nenhuma capa foi achada. Use os botões de capa.';}
+}
+(function(){
+ var c=document.getElementById('searchBoxContent');if(!c)return;
+ var sub=c.parentElement&&c.parentElement.querySelector('p.text-xs');if(sub)sub.textContent='Escolha um serviço para buscar título, artista, álbum e capa.';
+ var b='flex flex-col items-center gap-1 px-2 py-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white text-[11px] font-semibold transition-colors';
+ c.innerHTML=
+  '<div><div class="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Artista ou banda</div><input id="editorSearchArtist" class="editor-field" type="text" placeholder="Ex.: Stratovarius"></div>'+
+  '<label class="flex items-center gap-2 text-xs text-zinc-400"><input id="editorSearchArtistOnly" type="checkbox" class="accent-green-500"> Pesquisar só pelo nome da banda (ignorar o título)</label>'+
+  '<div class="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Buscar música em</div>'+
+  '<div class="grid grid-cols-3 gap-2"><button onclick="metaSearchBySource(\'mb\')" class="'+b+'">'+MD_LOGO.mb+'MusicBrainz</button><button onclick="metaSearchBySource(\'itunes\')" class="'+b+'">'+MD_LOGO.itunes+'iTunes</button><button onclick="metaSearchBySource(\'deezer\')" class="'+b+'">'+MD_LOGO.deezer+'Deezer</button></div>'+
+  '<div id="editorSearchStatus" class="text-xs text-zinc-400 min-h-4"></div>'+
+  '<div id="editorMatches" class="hidden space-y-2 max-h-56 overflow-y-auto pr-2"></div>'+
+  '<button onclick="resetEditorFields()" class="text-xs text-zinc-400 hover:text-white underline">Recarregar dados atuais</button>';
+ var grid=document.getElementById('editTitle');grid=grid&&grid.closest('.grid');
+ if(grid&&!document.getElementById('mdFieldsHead'))grid.insertAdjacentHTML('beforebegin','<div id="mdFieldsHead" class="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 -mb-2">Dados da música</div>');
+})();
+
+/* ===== C) Janela de capas: sem botão do Google (ele já fica abaixo, no editor) ===== */
+(function(){
+ var m=document.querySelector('#coverSearchModal .modal-content'),f=m&&m.lastElementChild;if(!f)return;
+ Array.from(f.children).forEach(function(el){if(/Google/i.test(el.textContent))el.remove();});
+ f.className='flex justify-end mt-6';
+})();
+
+/* ===== D) Salvar capa e salvar metadados passam a ser independentes ===== */
+function edSnapMeta(){
+ if(!editorBaseline)return;
+ editorBaseline.title=document.getElementById('editTitle').value;editorBaseline.artist=document.getElementById('editArtist').value;
+ editorBaseline.album=document.getElementById('editAlbum').value;editorBaseline.year=document.getElementById('editYear').value;
+ editorBaseline.genre=document.getElementById('editGenre').value;editorBaseline.track=document.getElementById('editTrack').value;
+}
+function edSnapCover(){
+ if(!editorBaseline)return;
+ var song=songs.find(function(s){return s.id===editorSongId;});
+ editorBaseline.cover=editorCoverBlob;editorBaseline.songCover=song?song.picture:null;
+}
+async function saveEditedCover(){
+ var song=songs.find(function(s){return s.id===editorSongId;});if(!song)return;
+ if(!editorCoverBlob){alert('Nenhuma imagem selecionada.');return;}
+ var btn=document.getElementById('btnSaveEditedCover');
+ if(btn){btn.disabled=true;var sp=btn.querySelector('span');if(sp)sp.textContent='Salvando...';}
+ try{
+  await applyCoverPending(song,editorCoverBlob,{source:'manual',oldArtist:song.artist,newArtist:song.artist,oldAlbum:song.album,newAlbum:song.album,groupArtist:song.artist,groupAlbum:song.album,coverArtist:editorCoverMeta.artist,coverAlbum:editorCoverMeta.album});
+  document.getElementById('editorSearchStatus').textContent='Capa salva. Aplicada ao player e adicionada à aba Pendentes.';
+  edSnapCover();
+  if(btn)btn.dataset.saved='1';
+  updateEditorSaveButtons();
+ }catch(err){if(btn)btn.dataset.saved='0';updateEditorSaveButtons();alert('Falha ao salvar a imagem: '+err.message);}
+}
+async function saveEditedMetadata(){
+ var song=songs.find(function(s){return s.id===editorSongId;});if(!song)return;
+ var g=function(i){return document.getElementById(i).value.trim();};
+ var nv={title:g('editTitle'),artist:g('editArtist'),album:g('editAlbum'),year:g('editYear'),genre:g('editGenre'),track:g('editTrack')};
+ var ov={title:song.title||'',artist:song.artist||'',album:song.album||'',year:song.year||'',genre:song.genre||'',track:song.track||''};
+ if(!Object.keys(nv).some(function(k){return(nv[k]||'')!==(ov[k]||'');})){alert('Nenhuma alteração nos metadados.');return;}
+ var mb=document.getElementById('btnSaveEditedMetadata');
+ if(mb){mb.disabled=true;mb.textContent='Salvando...';}
+ song.title=nv.title||song.name;song.artist=nv.artist||'Desconhecido';song.album=nv.album||'Desconhecido';
+ song.year=nv.year;song.genre=nv.genre;song.track=nv.track;
+ await saveToDB(song);
+ if(currentSongId===song.id){currentSongTitle.innerText=song.title;currentSongMeta.innerText=(song.artist||'Desconhecido')+(song.album&&song.album!=='Desconhecido'?' • '+song.album:'');}
+ await addOrMergePending({id:(crypto.randomUUID?crypto.randomUUID():'p-'+Date.now()+'-'+Math.random().toString(36).slice(2)),songId:song.id,type:'metadata',source:'manual',coverBlob:null,oldArtist:ov.artist,newArtist:nv.artist,oldAlbum:ov.album,newAlbum:nv.album,oldValues:ov,newValues:nv,groupKey:groupKeyOf(nv.artist,nv.album),createdAt:Date.now()});
+ renderSongs();updateArtists();
+ document.getElementById('editorSearchStatus').textContent='Metadados salvos. Aplicados ao player e adicionados à aba Pendentes.';
+ edSnapMeta();
+ if(mb)mb.dataset.saved='1';
+ updateEditorSaveButtons();
+}
+
+/* ===== E) Textos do tour ===== */
+if(typeof TOUR!=='undefined'){
+ var T12={
+  'Preencher dados automaticamente':'Escolha MusicBrainz, iTunes ou Deezer para buscar a música. Ao escolher uma versão, preenche título, artista, álbum e ano (quando o serviço informa) e já tenta achar a capa. Confira antes de salvar.',
+  'Salvar metadados':'Aplica os campos no player na hora e cria uma pendência. A capa é salva à parte, em "Salvar capa". Para gravar no MP3, use "Substituir arquivo local" em Pendentes.',
+  'Pendentes':'Lista as mudanças de capa e de dados que você fez. Elas já valem no player, mas ainda não estão dentro do MP3. Capas achadas nas buscas automáticas (lote ou segundo plano) também caem aqui, com o serviço que achou.',
+  'Buscar capas faltantes':'Abre a busca em lote: procura sozinho a capa das músicas sem imagem (precisam ter artista e álbum preenchidos).',
+  'Busca em lote':'Toque para começar. Procura em iTunes, Deezer, Cover Art Archive e TheAudioDB, nessa ordem, e mostra qual serviço achou cada capa. Já vêm marcadas: desmarque as erradas e toque em "Enviar para Pendentes".'
+ };
+ TOUR.forEach(function(s){if(T12[s.t])s.x=T12[s.t];if(s.t==='Pesquisar no Google Imagens'){s.v='editor';s.s=function(){return document.querySelector('#metadataEditorView button[onclick="openGoogleImages()"]');};}});
+}
+</script>
+
 </body>
 </html>
